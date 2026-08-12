@@ -138,6 +138,9 @@ def render_env(config: CountryConfig) -> str:
             "POSTGRES_PASSWORD=replace-with-a-long-random-password",
             "MINIO_ROOT_USER=brunost",
             "MINIO_ROOT_PASSWORD=replace-with-a-long-random-password",
+            "BRUNOST_ARTIFACT_ACCESS_KEY=replace-with-object-storage-access-key",
+            "BRUNOST_ARTIFACT_SECRET_KEY=replace-with-object-storage-secret-key",
+            "BRUNOST_ARTIFACT_ENDPOINT=https://s3.example.org",
             "BRUNOST_POSTGRES_URL=postgresql://user:password@db.example:5432/brunost",
             "",
         ]
