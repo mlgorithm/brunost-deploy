@@ -15,3 +15,5 @@ jobs:
       - run: python -m pip install -e '.[dev]'
       - run: ruff check src tests
       - run: pytest -q
+      - uses: azure/setup-helm@v4
+      - run: helm lint helm/brunost
