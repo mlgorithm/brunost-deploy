@@ -1,0 +1,66 @@
+{{- range .Values.workers }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "brunost.fullname" $ }}-worker-{{ .name }}
+  labels:
+    {{- include "brunost.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: worker
+    brunost.io/worker-class: {{ .name | quote }}
+spec:
+  replicas: {{ .replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: worker
+      brunost.io/worker-class: {{ .name | quote }}
+      {{- include "brunost.labels" $ | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: worker
+        brunost.io/worker-class: {{ .name | quote }}
+        {{- include "brunost.labels" $ | nindent 8 }}
+    spec:
+      containers:
+        - name: worker
+          image: {{ .image | quote }}
+          command: ["brunost", "worker", "--config", "/etc/brunost/node.json", "--poll-seconds", "1"]
+          env:
+            - name: BRUNOST_JUDGE_ENV
+              value: production
+            - name: BRUNOST_JUDGE_REQUIRE_IMMUTABLE_ARTIFACTS
+              value: "true"
+            - name: BRUNOST_JUDGE_SANDBOX_MODE
+              value: "docker"
+            - name: BRUNOST_WORKER_QUEUES
+              value: {{ join "," .queues | quote }}
+            - name: BRUNOST_WORKER_RESOURCE_CLASSES
+              value: {{ join "," .resourceClasses | quote }}
+            - name: BRUNOST_JUDGE_URL
+              value: http://{{ include "brunost.fullname" $ }}-judge:{{ $.Values.judge.port }}
+            - name: BRUNOST_JUDGE_ARTIFACT_BACKEND
+              value: {{ $.Values.artifacts.backend | quote }}
+            - name: BRUNOST_JUDGE_ARTIFACT_ENDPOINT
+              value: {{ $.Values.artifacts.endpoint | quote }}
+            - name: BRUNOST_JUDGE_ARTIFACT_BUCKET
+              value: {{ $.Values.artifacts.bucket | quote }}
+            - name: BRUNOST_JUDGE_ARTIFACT_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "brunost.fullname" $ }}-judge
+                  key: artifact-access-key
+            - name: BRUNOST_JUDGE_ARTIFACT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "brunost.fullname" $ }}-judge
+                  key: artifact-secret-key
+          volumeMounts:
+            - name: node-config
+              mountPath: /etc/brunost
+              readOnly: true
+      volumes:
+        - name: node-config
+          secret:
+            secretName: {{ include "brunost.fullname" $ }}-node-{{ .name }}
+{{- end }}

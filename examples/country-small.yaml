@@ -1,0 +1,44 @@
+version: 1
+
+cluster:
+  name: country-2026
+  public_url: https://contest.example.org
+
+backend: compose
+
+platform:
+  replicas: 1
+  image: ghcr.io/mlgorithm/brunost-platform@sha256:<64-hex-digest>
+
+judge:
+  replicas: 1
+  image: ghcr.io/mlgorithm/brunost-judge@sha256:<64-hex-digest>
+  worker_image: ghcr.io/mlgorithm/brunost-judge@sha256:<64-hex-digest>
+
+workers:
+  - name: cpu-1
+    resource_classes: [cpu]
+    queues: [default]
+  - name: cpu-2
+    resource_classes: [cpu]
+    queues: [default]
+  - name: gpu-1
+    resource_classes: [gpu, cpu]
+    queues: [gpu, default]
+    capabilities: [cuda]
+
+storage:
+  postgres: bundled
+  postgres_image: postgres@sha256:<64-hex-digest>
+  artifacts: minio
+  artifacts_image: minio/minio@sha256:<64-hex-digest>
+  artifacts_init_image: minio/mc@sha256:<64-hex-digest>
+
+security:
+  tls: true
+
+observability:
+  monitoring: true
+
+backup:
+  schedule: "0 2 * * *"

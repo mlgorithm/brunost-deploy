@@ -1,0 +1,31 @@
+[project]
+name = "brunost-deploy"
+version = "0.1.0"
+description = "No-code deployment and lifecycle tooling for Brunost Platform and Judge"
+requires-python = ">=3.11"
+dependencies = ["PyYAML>=6.0,<7"]
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Mlgorithm contributors"}]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+]
+
+[project.scripts]
+brunostctl = "brunostctl.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
