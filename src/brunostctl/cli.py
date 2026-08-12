@@ -10,11 +10,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
 import urllib.error
 import urllib.request
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +24,7 @@ import yaml
 
 from brunostctl.config import ConfigError, CountryConfig
 from brunostctl.presets import preset_mapping
-from brunostctl.render import render_compose, render_env
+from brunostctl.render import helm_values_mapping, render_compose, render_env
 
 
 def _json_request(url: str, *, method: str = "GET", token: str | None = None, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -66,6 +68,19 @@ def _load_config(path: Path, *, strict: bool = False) -> CountryConfig:
     return config
 
 
+def _load_dotenv(root: Path) -> None:
+    """Load simple KEY=VALUE pairs without adding a dotenv dependency."""
+    path = root / ".env"
+    if not path.is_file():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
 def _config_path(value: str | None) -> Path:
     return Path(value or "brunost.yaml").expanduser().resolve()
 
@@ -77,10 +92,12 @@ def _command_available(command: str) -> bool:
 def _render(root: Path, config: CountryConfig, *, force: bool = False) -> list[Path]:
     generated = root / ".brunost" / "rendered"
     generated.mkdir(parents=True, exist_ok=True)
+    _materialize_chart(root, force=force)
     files = {
         generated / "docker-compose.yml": render_compose(config),
         generated / ".env.example": render_env(config),
         generated / "topology.json": json.dumps(config.as_mapping(), indent=2, sort_keys=True) + "\n",
+        generated / "helm-values.yaml": yaml.safe_dump(helm_values_mapping(config), sort_keys=False),
     }
     written: list[Path] = []
     for path, content in files.items():
@@ -93,6 +110,26 @@ def _render(root: Path, config: CountryConfig, *, force: bool = False) -> list[P
             path.write_text(content, encoding="utf-8")
         written.append(path)
     return written
+
+
+def _materialize_chart(root: Path, *, force: bool) -> Path:
+    """Put the packaged chart in the operator bundle.
+
+    This keeps ``brunostctl init`` self-contained: a country operator can
+    install from a wheel without cloning this repository or knowing where the
+    chart source lives.
+    """
+    destination = root / ".brunost" / "chart"
+    if destination.is_dir() and not force:
+        return destination
+    source = Path(__file__).resolve().parents[2] / "helm" / "brunost"
+    if source.is_dir():
+        shutil.copytree(source, destination, dirs_exist_ok=True)
+        return destination
+    packaged = resources.files("brunostctl").joinpath("chart", "brunost")
+    with resources.as_file(packaged) as unpacked:
+        shutil.copytree(unpacked, destination, dirs_exist_ok=True)
+    return destination
 
 
 def _preflight(config: CountryConfig, *, strict: bool, backend: str | None = None, root: Path | None = None) -> list[str]:
@@ -221,8 +258,11 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps([str(path) for path in paths], indent=2))
             return 0
         if args.command == "install":
+            _load_dotenv(args.config.parent)
             config = _load_config(args.config, strict=True)
             backend = args.backend or config.backend
+            if args.backend and args.backend != config.backend:
+                raise ConfigError(f"--backend {args.backend} conflicts with backend: {config.backend} in {args.config}")
             warnings = _preflight(config, strict=True, backend=backend, root=args.config.parent)
             missing_nodes = [worker.name for worker in config.workers if not (args.config.parent / "nodes" / f"{worker.name}.json").is_file()]
             if missing_nodes:
@@ -235,11 +275,13 @@ def main(argv: list[str] | None = None) -> int:
             _render(args.config.parent, config, force=args.force)
             if backend == "compose":
                 return _run(["docker", "compose", "--env-file", ".env", "-f", ".brunost/rendered/docker-compose.yml", "up", "-d"], cwd=args.config.parent, dry_run=args.dry_run)
-            command = ["helm", "upgrade", "--install", config.name, "./helm/brunost", "--namespace", config.name, "--create-namespace"]
+            command = ["helm", "upgrade", "--install", config.name, ".brunost/chart", "--namespace", config.name, "--create-namespace"]
             for worker in config.workers:
                 command.extend(["--set-file", f"nodeConfigs.{worker.name}=nodes/{worker.name}.json"])
+            command.extend(["-f", ".brunost/rendered/helm-values.yaml"])
             return _run(command, cwd=args.config.parent, dry_run=args.dry_run)
         if args.command in {"upgrade", "rollback", "backup"}:
+            _load_dotenv(args.config.parent)
             config = _load_config(args.config, strict=args.command != "backup")
             if args.command == "backup":
                 if config.storage.postgres == "external":
@@ -250,11 +292,17 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     command = ["docker", "compose", "-f", ".brunost/rendered/docker-compose.yml", "exec", "-T", "postgres", "pg_dump", "-U", "brunost", "brunost"]
             elif args.command == "upgrade":
-                command = ["helm", "upgrade", config.name, "./helm/brunost", "--namespace", config.name] if config.backend == "k3s" else ["docker", "compose", "-f", ".brunost/rendered/docker-compose.yml", "up", "-d", "--pull", "always"]
+                _render(args.config.parent, config, force=True)
+                if config.backend == "k3s":
+                    command = ["helm", "upgrade", config.name, ".brunost/chart", "--namespace", config.name, "-f", ".brunost/rendered/helm-values.yaml"]
+                    for worker in config.workers:
+                        command.extend(["--set-file", f"nodeConfigs.{worker.name}=nodes/{worker.name}.json"])
+                else:
+                    command = ["docker", "compose", "--env-file", ".env", "-f", ".brunost/rendered/docker-compose.yml", "up", "-d", "--pull", "always"]
             else:
                 if not args.release:
                     raise ConfigError("rollback requires --release")
-                command = ["helm", "rollback", config.name, args.release, "--namespace", config.name] if config.backend == "k3s" else ["docker", "compose", "-f", ".brunost/rendered/docker-compose.yml", "up", "-d"]
+                command = ["helm", "rollback", config.name, args.release, "--namespace", config.name] if config.backend == "k3s" else ["docker", "compose", "--env-file", ".env", "-f", ".brunost/rendered/docker-compose.yml", "up", "-d"]
             return _run(command, cwd=args.config.parent, dry_run=args.dry_run)
         if args.command == "status":
             result = _json_request(args.url.rstrip("/") + "/healthz", token=args.token)
@@ -288,7 +336,7 @@ def _node_command(args: argparse.Namespace) -> int:
             raise ConfigError("--join-token or BRUNOST_JUDGE_JOIN_TOKEN is required")
         payload = {
             "join_token": args.join_token,
-            "hostname": args.node_id or os.uname().nodename,
+            "hostname": args.node_id or platform.node(),
             "capabilities": args.capability,
             "resource_classes": args.resource_classes or ["cpu"],
             "metadata": {"region": args.region} if args.region else {},

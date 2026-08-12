@@ -78,8 +78,12 @@ class CountryConfig:
         judge = raw.get("judge") or {}
         storage_raw = raw.get("storage") or {}
         workers_raw = raw.get("workers") or []
-        if not isinstance(cluster, dict) or not isinstance(platform, dict) or not isinstance(judge, dict):
-            raise ConfigError("cluster, platform, and judge must be mappings")
+        for name, value in (("cluster", cluster), ("platform", platform), ("judge", judge), ("storage", storage_raw)):
+            if not isinstance(value, dict):
+                raise ConfigError(f"{name} must be a mapping")
+        for name in ("security", "observability", "backup"):
+            if raw.get(name) is not None and not isinstance(raw[name], dict):
+                raise ConfigError(f"{name} must be a mapping")
         if not isinstance(workers_raw, list):
             raise ConfigError("workers must be a list")
         workers: list[WorkerConfig] = []
@@ -140,6 +144,9 @@ class CountryConfig:
         names = [worker.name for worker in self.workers]
         if len(names) != len(set(names)):
             errors.append("worker names must be unique")
+        for worker in self.workers:
+            if len(worker.name) > 63 or worker.name != worker.name.lower() or not worker.name.replace("-", "").isalnum() or worker.name.startswith("-") or worker.name.endswith("-"):
+                errors.append(f"worker {worker.name!r} must be a DNS-safe name")
         for worker in self.workers:
             if worker.replicas < 1:
                 errors.append(f"worker {worker.name} replicas must be positive")

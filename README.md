@@ -61,6 +61,10 @@ the HA preset uses Helm/K3s. PostgreSQL and artifact storage must be shared by
 every control-plane and worker process. For production, use replicated or
 managed PostgreSQL and an S3-compatible artifact store.
 
+The Helm chart is bundled inside the `brunostctl` package. `init` materializes
+it under `.brunost/chart`, so a country operator can run the K3s installation
+from the generated directory without cloning this repository or writing YAML.
+
 ## Ownership
 
 ```mermaid

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 
@@ -145,3 +147,59 @@ def render_env(config: CountryConfig) -> str:
             "",
         ]
     )
+
+
+def helm_values_mapping(config: CountryConfig) -> dict[str, Any]:
+    """Translate the country topology into the Helm chart's value schema."""
+
+    def resolve(value: str) -> str:
+        """Resolve a deliberate ``${ENV_NAME}`` placeholder when available.
+
+        Render remains safe before an operator has created ``.env`` (the
+        placeholder is retained), while ``install`` can load the operator's
+        secrets before rendering a usable Kubernetes Secret manifest.
+        """
+        if value.startswith("${") and value.endswith("}"):
+            return os.environ.get(value[2:-1], value)
+        return value
+
+    parsed = urlparse(config.public_url)
+    return {
+        "platform": {"image": config.platform_image, "replicas": config.platform_replicas, "port": 3000},
+        "judge": {
+            "image": config.judge_image,
+            "replicas": config.judge_replicas,
+            "port": 8787,
+            "apiToken": resolve("${BRUNOST_JUDGE_API_TOKEN}"),
+            "callbackSigningSecret": resolve("${BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET}"),
+        },
+        "workers": [
+            {
+                "name": worker.name,
+                "image": config.worker_image,
+                "replicas": worker.replicas,
+                "queues": list(worker.queues),
+                "resourceClasses": list(worker.resource_classes),
+            }
+            for worker in config.workers
+        ],
+        "nodeConfigs": {},
+        "postgres": {
+            "externalUrl": resolve(config.storage.postgres_url or ""),
+            "image": config.storage.postgres_image,
+        },
+        "artifacts": {
+            "endpoint": resolve(config.storage.artifacts_endpoint or ""),
+            "bucket": config.storage.artifacts_bucket,
+            "backend": "s3",
+            "accessKey": resolve("${BRUNOST_ARTIFACT_ACCESS_KEY}"),
+            "secretKey": resolve("${BRUNOST_ARTIFACT_SECRET_KEY}"),
+        },
+        "ingress": {
+            "enabled": config.tls,
+            "className": "nginx",
+            "host": parsed.hostname or "contest.example.org",
+            "tlsSecret": "brunost-tls",
+        },
+        "monitoring": {"enabled": config.monitoring},
+    }
