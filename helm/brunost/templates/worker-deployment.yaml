@@ -25,7 +25,7 @@ spec:
       containers:
         - name: worker
           image: {{ .image | quote }}
-          command: ["brunost", "worker", "--config", "/etc/brunost/node.json", "--poll-seconds", "1"]
+          command: ["worker", "--config", "/etc/brunost/node.json", "--poll-seconds", "1"]
           env:
             - name: BRUNOST_JUDGE_ENV
               value: production

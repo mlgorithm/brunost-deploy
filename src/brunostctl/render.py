@@ -56,7 +56,8 @@ def compose_mapping(config: CountryConfig) -> dict[str, Any]:
         },
         "judge": {
             "image": config.judge_image,
-            "command": ["brunost", "server", "--host", "0.0.0.0", "--port", "8787"],
+            # The Judge image declares ``brunost`` as its entrypoint.
+            "command": ["server", "--host", "0.0.0.0", "--port", "8787"],
             "environment": _environment(config, service="judge"),
             "ports": ["8787:8787"],
             "depends_on": ["postgres"] if config.storage.postgres == "bundled" else [],
@@ -96,7 +97,6 @@ def compose_mapping(config: CountryConfig) -> dict[str, Any]:
         services[f"worker-{worker.name}"] = {
             "image": config.worker_image,
             "command": [
-                "brunost",
                 "worker",
                 "--config",
                 "/etc/brunost/node.json",
