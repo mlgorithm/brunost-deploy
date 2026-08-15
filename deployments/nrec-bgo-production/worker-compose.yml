@@ -1,0 +1,48 @@
+services:
+  docker-socket-proxy:
+    image: ${BRUNOST_DOCKER_SOCKET_PROXY_IMAGE:?set BRUNOST_DOCKER_SOCKET_PROXY_IMAGE to a digest-pinned image}
+    environment:
+      CONTAINERS: "1"
+      IMAGES: "1"
+      INFO: "1"
+      VERSION: "1"
+      POST: "1"
+      NETWORKS: "0"
+      VOLUMES: "0"
+      EXEC: "0"
+      AUTH: "0"
+      SECRETS: "0"
+      SWARM: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  judge-worker:
+    image: ${BRUNOST_JUDGE_WORKER_IMAGE:?set BRUNOST_JUDGE_WORKER_IMAGE to a digest-pinned image}
+    command: ["worker", "--config", "/etc/brunost/node.json", "--poll-seconds", "1", "--lease-seconds", "300"]
+    environment:
+      BRUNOST_JUDGE_SANDBOX_MODE: docker
+      BRUNOST_JUDGE_SANDBOX_IMAGE: ${BRUNOST_JUDGE_SANDBOX_IMAGE:?set BRUNOST_JUDGE_SANDBOX_IMAGE}
+      BRUNOST_JUDGE_SANDBOX_RUNTIME: runsc
+      BRUNOST_JUDGE_REQUIRE_SECCOMP: "true"
+      BRUNOST_JUDGE_SANDBOX_SECCOMP: /srv/brunost-judge/security/brunost-seccomp.json
+      BRUNOST_JUDGE_SANDBOX_TIMEOUT_SECONDS: "900"
+      BRUNOST_JUDGE_SANDBOX_MEMORY: 4g
+      BRUNOST_JUDGE_SANDBOX_CPUS: "2"
+      BRUNOST_JUDGE_SANDBOX_PIDS_LIMIT: "256"
+      BRUNOST_JUDGE_ENV: production
+      BRUNOST_JUDGE_REQUIRE_IMMUTABLE_ARTIFACTS: "true"
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
+      TMPDIR: /srv/brunost-judge/workspaces
+    volumes:
+      - /srv/brunost-judge/node.json:/etc/brunost/node.json:ro
+      - /srv/brunost-judge/workspaces:/srv/brunost-judge/workspaces:rw
+      - /srv/brunost-judge/security/brunost-seccomp.json:/srv/brunost-judge/security/brunost-seccomp.json:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - docker-socket-proxy
+    restart: unless-stopped

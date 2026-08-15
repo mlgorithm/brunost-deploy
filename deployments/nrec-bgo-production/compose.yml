@@ -1,0 +1,116 @@
+services:
+  judge-api:
+    image: ${BRUNOST_JUDGE_IMAGE:?set BRUNOST_JUDGE_IMAGE to a digest-pinned image}
+    command: ["server", "--host", "0.0.0.0", "--port", "8787"]
+    environment:
+      BRUNOST_JUDGE_DATABASE_URL: ${BRUNOST_JUDGE_DATABASE_URL:?set BRUNOST_JUDGE_DATABASE_URL}
+      BRUNOST_JUDGE_API_TOKEN: ${BRUNOST_JUDGE_API_TOKEN:?set BRUNOST_JUDGE_API_TOKEN}
+      BRUNOST_JUDGE_REQUIRE_API_TOKEN: "true"
+      BRUNOST_JUDGE_REQUIRE_WORKER_TOKEN: "true"
+      BRUNOST_JUDGE_CLUSTER_ID: ${BRUNOST_JUDGE_CLUSTER_ID:?set BRUNOST_JUDGE_CLUSTER_ID}
+      BRUNOST_JUDGE_ARTIFACT_BACKEND: s3
+      BRUNOST_JUDGE_ARTIFACT_ENDPOINT: ${BRUNOST_JUDGE_ARTIFACT_ENDPOINT:?set BRUNOST_JUDGE_ARTIFACT_ENDPOINT}
+      BRUNOST_JUDGE_ARTIFACT_REGION: ${BRUNOST_JUDGE_ARTIFACT_REGION:-us-east-1}
+      BRUNOST_JUDGE_ARTIFACT_BUCKET: ${BRUNOST_JUDGE_ARTIFACT_BUCKET:?set BRUNOST_JUDGE_ARTIFACT_BUCKET}
+      BRUNOST_JUDGE_ARTIFACT_ACCESS_KEY: ${BRUNOST_JUDGE_ARTIFACT_ACCESS_KEY:?set BRUNOST_JUDGE_ARTIFACT_ACCESS_KEY}
+      BRUNOST_JUDGE_ARTIFACT_SECRET_KEY: ${BRUNOST_JUDGE_ARTIFACT_SECRET_KEY:?set BRUNOST_JUDGE_ARTIFACT_SECRET_KEY}
+      BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET: ${BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET:?set BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET}
+      BRUNOST_JUDGE_CALLBACK_HOSTS: ${BRUNOST_JUDGE_CALLBACK_HOSTS:?set BRUNOST_JUDGE_CALLBACK_HOSTS}
+      BRUNOST_JUDGE_REQUIRE_HTTPS_CALLBACKS: "true"
+      BRUNOST_JUDGE_ALLOW_INTERNAL_HTTP_CALLBACKS: ${BRUNOST_JUDGE_ALLOW_INTERNAL_HTTP_CALLBACKS:-false}
+      BRUNOST_JUDGE_ENV: production
+    ports:
+      - "${BRUNOST_JUDGE_BIND:-127.0.0.1}:8787:8787"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/healthz', timeout=5).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  platform:
+    image: ${BRUNOST_PLATFORM_IMAGE:?set BRUNOST_PLATFORM_IMAGE to a digest-pinned image}
+    environment:
+      BRUNOST_JUDGE_URL: http://judge-api:8787
+      BRUNOST_JUDGE_API_TOKEN: ${BRUNOST_JUDGE_API_TOKEN:?set BRUNOST_JUDGE_API_TOKEN}
+      BRUNOST_PLATFORM_CALLBACK_URL: http://platform:3000/api/judge/callback
+      BRUNOST_PLATFORM_CALLBACK_TOKEN: ${BRUNOST_PLATFORM_CALLBACK_TOKEN:?set BRUNOST_PLATFORM_CALLBACK_TOKEN}
+      BRUNOST_JUDGE_CALLBACK_SECRET: ${BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET:?set BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET}
+      BRUNOST_PLATFORM_DATABASE: /var/lib/brunost/platform/platform.db
+      BRUNOST_SUBMISSION_ROOT: /var/lib/brunost/platform/submissions
+      BRUNOST_DEFAULT_ADMIN_EMAIL: ${BRUNOST_DEFAULT_ADMIN_EMAIL:?set BRUNOST_DEFAULT_ADMIN_EMAIL}
+      BRUNOST_DEFAULT_ADMIN_PASSWORD: ${BRUNOST_DEFAULT_ADMIN_PASSWORD:?set BRUNOST_DEFAULT_ADMIN_PASSWORD}
+      BRUNOST_DEFAULT_ADMIN_NAME: ${BRUNOST_DEFAULT_ADMIN_NAME:-Country operator}
+      BRUNOST_PLATFORM_EDITION: standalone
+      BRUNOST_PLATFORM_FEATURES: ""
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - platform-data:/var/lib/brunost/platform
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      judge-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  docker-socket-proxy:
+    image: ${BRUNOST_DOCKER_SOCKET_PROXY_IMAGE:?set BRUNOST_DOCKER_SOCKET_PROXY_IMAGE to a digest-pinned image}
+    environment:
+      CONTAINERS: "1"
+      IMAGES: "1"
+      INFO: "1"
+      VERSION: "1"
+      POST: "1"
+      NETWORKS: "0"
+      VOLUMES: "0"
+      EXEC: "0"
+      AUTH: "0"
+      SECRETS: "0"
+      SWARM: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  judge-worker:
+    image: ${BRUNOST_JUDGE_WORKER_IMAGE:?set BRUNOST_JUDGE_WORKER_IMAGE to a digest-pinned image}
+    command: ["worker", "--config", "/etc/brunost/node.json", "--poll-seconds", "1", "--lease-seconds", "300"]
+    environment:
+      BRUNOST_JUDGE_SANDBOX_MODE: docker
+      BRUNOST_JUDGE_SANDBOX_IMAGE: ${BRUNOST_JUDGE_SANDBOX_IMAGE:?set BRUNOST_JUDGE_SANDBOX_IMAGE}
+      BRUNOST_JUDGE_SANDBOX_RUNTIME: runsc
+      BRUNOST_JUDGE_REQUIRE_SECCOMP: "true"
+      BRUNOST_JUDGE_SANDBOX_SECCOMP: /srv/brunost-judge/security/brunost-seccomp.json
+      BRUNOST_JUDGE_SANDBOX_TIMEOUT_SECONDS: "900"
+      BRUNOST_JUDGE_SANDBOX_MEMORY: 4g
+      BRUNOST_JUDGE_SANDBOX_CPUS: "2"
+      BRUNOST_JUDGE_SANDBOX_PIDS_LIMIT: "256"
+      BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET: ${BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET:?set BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET}
+      BRUNOST_JUDGE_ENV: production
+      BRUNOST_JUDGE_REQUIRE_IMMUTABLE_ARTIFACTS: "true"
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
+      TMPDIR: /srv/brunost-judge/workspaces
+    volumes:
+      - /srv/brunost-judge/node.json:/etc/brunost/node.json:ro
+      - /srv/brunost-judge/workspaces:/srv/brunost-judge/workspaces:rw
+      - /srv/brunost-judge/security/brunost-seccomp.json:/srv/brunost-judge/security/brunost-seccomp.json:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - docker-socket-proxy
+    restart: unless-stopped
+
+volumes:
+  platform-data:

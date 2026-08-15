@@ -1,0 +1,14 @@
+[Unit]
+Description=Brunost Judge PostgreSQL and artifact backup
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+Environment=BRUNOST_DATA_ENV=/srv/brunost/env/data.env
+Environment=BRUNOST_JUDGE_BACKUP_DIR=/srv/brunost/backups/judge
+Environment=BRUNOST_JUDGE_DB_NAME=brunost_judge
+Environment=BRUNOST_JUDGE_BUCKET=brunost-judge-artifacts
+Environment=BRUNOST_JUDGE_MC_IMAGE=minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+Environment=BRUNOST_JUDGE_BACKUP_RETENTION_DAYS=30
+ExecStart=/usr/local/sbin/brunost-judge-backup
