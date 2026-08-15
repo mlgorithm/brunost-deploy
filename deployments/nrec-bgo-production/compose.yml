@@ -39,7 +39,10 @@ services:
     environment:
       BRUNOST_JUDGE_URL: http://judge-api:8787
       BRUNOST_JUDGE_API_TOKEN: ${BRUNOST_JUDGE_API_TOKEN:?set BRUNOST_JUDGE_API_TOKEN}
-      BRUNOST_PLATFORM_CALLBACK_URL: http://platform:3000/api/judge/callback
+      # Workers run on separate VMs, so callbacks must use the private compute
+      # address rather than the Docker-only service name.  The security group
+      # permits this port only from the worker group.
+      BRUNOST_PLATFORM_CALLBACK_URL: ${BRUNOST_PLATFORM_CALLBACK_URL:?set BRUNOST_PLATFORM_CALLBACK_URL to the private platform callback URL}
       BRUNOST_PLATFORM_CALLBACK_TOKEN: ${BRUNOST_PLATFORM_CALLBACK_TOKEN:?set BRUNOST_PLATFORM_CALLBACK_TOKEN}
       BRUNOST_JUDGE_CALLBACK_SECRET: ${BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET:?set BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET}
       BRUNOST_PLATFORM_DATABASE: /var/lib/brunost/platform/platform.db
@@ -50,7 +53,7 @@ services:
       BRUNOST_PLATFORM_EDITION: standalone
       BRUNOST_PLATFORM_FEATURES: ""
     ports:
-      - "127.0.0.1:3000:3000"
+      - "${BRUNOST_PLATFORM_BIND:-0.0.0.0}:3000:3000"
     volumes:
       - platform-data:/var/lib/brunost/platform
     read_only: true
