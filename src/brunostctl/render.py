@@ -11,35 +11,35 @@ import yaml
 from brunostctl.config import CountryConfig
 
 
-def _environment(config: CountryConfig, *, service: str) -> dict[str, str]:
-    postgres = (
-        "${BRUNOST_POSTGRES_URL}"
-        if config.storage.postgres == "external"
-        else "postgresql://brunost:${POSTGRES_PASSWORD}@postgres:5432/brunost"
-    )
+def _environment(config: CountryConfig, *, control_plane: bool) -> dict[str, str]:
     artifacts_endpoint = config.storage.artifacts_endpoint or "http://minio:9000"
     artifact_backend = "s3" if config.storage.artifacts in {"minio", "s3", "external"} else "filesystem"
     values = {
         "BRUNOST_CLUSTER_NAME": config.name,
-        "BRUNOST_JUDGE_DATABASE_URL": postgres,
-        "BRUNOST_JUDGE_API_TOKEN": "${BRUNOST_JUDGE_API_TOKEN}",
-        "BRUNOST_JUDGE_REQUIRE_API_TOKEN": "true",
         "BRUNOST_JUDGE_REQUIRE_WORKER_TOKEN": "true",
+        "BRUNOST_JUDGE_ENV": "production",
+        "BRUNOST_JUDGE_REQUIRE_IMMUTABLE_ARTIFACTS": "true",
         "BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET": "${BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET}",
+        "BRUNOST_JUDGE_CALLBACK_HOSTS": ",".join(config.callback_hosts),
         "BRUNOST_JUDGE_CLUSTER_ID": config.name,
         "BRUNOST_JUDGE_ARTIFACT_BACKEND": artifact_backend,
         "BRUNOST_JUDGE_ARTIFACT_ENDPOINT": artifacts_endpoint,
         "BRUNOST_JUDGE_ARTIFACT_BUCKET": config.storage.artifacts_bucket,
         "BRUNOST_JUDGE_ARTIFACT_ACCESS_KEY": "${MINIO_ROOT_USER}" if config.storage.artifacts == "minio" else "${BRUNOST_ARTIFACT_ACCESS_KEY}",
         "BRUNOST_JUDGE_ARTIFACT_SECRET_KEY": "${MINIO_ROOT_PASSWORD}" if config.storage.artifacts == "minio" else "${BRUNOST_ARTIFACT_SECRET_KEY}",
-        "BRUNOST_JUDGE_CALLBACK_HOSTS": "platform",
     }
-    if service == "platform":
+    if control_plane:
+        postgres = (
+            "${BRUNOST_POSTGRES_URL}"
+            if config.storage.postgres == "external"
+            else "postgresql://brunost:${POSTGRES_PASSWORD}@postgres:5432/brunost"
+        )
         values.update(
             {
-                "BRUNOST_JUDGE_URL": "http://judge:8787",
-                "BRUNOST_PLATFORM_CALLBACK_SECRET": "${BRUNOST_PLATFORM_CALLBACK_SECRET}",
-                "BRUNOST_PLATFORM_PUBLIC_URL": config.public_url,
+                "BRUNOST_JUDGE_DATABASE_URL": postgres,
+                "BRUNOST_JUDGE_API_TOKEN": "${BRUNOST_JUDGE_API_TOKEN}",
+                "BRUNOST_JUDGE_REQUIRE_API_TOKEN": "true",
+                "BRUNOST_JUDGE_CALLBACK_HOSTS": ",".join(config.callback_hosts),
             }
         )
     return values
@@ -47,18 +47,11 @@ def _environment(config: CountryConfig, *, service: str) -> dict[str, str]:
 
 def compose_mapping(config: CountryConfig) -> dict[str, Any]:
     services: dict[str, Any] = {
-        "platform": {
-            "image": config.platform_image,
-            "environment": _environment(config, service="platform"),
-            "depends_on": ["judge"],
-            "restart": "unless-stopped",
-            "deploy": {"replicas": config.platform_replicas},
-        },
         "judge": {
             "image": config.judge_image,
             # The Judge image declares ``brunost`` as its entrypoint.
             "command": ["server", "--host", "0.0.0.0", "--port", "8787"],
-            "environment": _environment(config, service="judge"),
+            "environment": _environment(config, control_plane=True),
             "ports": ["8787:8787"],
             "depends_on": ["postgres"] if config.storage.postgres == "bundled" else [],
             "restart": "unless-stopped",
@@ -104,7 +97,7 @@ def compose_mapping(config: CountryConfig) -> dict[str, Any]:
                 "1",
             ],
             "environment": {
-                **_environment(config, service="worker"),
+                **_environment(config, control_plane=False),
                 "BRUNOST_JUDGE_URL": "http://judge:8787",
                 "BRUNOST_WORKER_QUEUES": ",".join(worker.queues),
                 "BRUNOST_WORKER_RESOURCE_CLASSES": ",".join(worker.resource_classes),
@@ -136,7 +129,7 @@ def render_env(config: CountryConfig) -> str:
             f"BRUNOST_PUBLIC_URL={config.public_url}",
             "BRUNOST_JUDGE_API_TOKEN=replace-with-a-long-random-token",
             "BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET=replace-with-a-long-random-secret",
-            "BRUNOST_PLATFORM_CALLBACK_SECRET=replace-with-a-long-random-secret",
+            f"BRUNOST_JUDGE_CALLBACK_HOSTS={','.join(config.callback_hosts)}",
             "POSTGRES_PASSWORD=replace-with-a-long-random-password",
             "MINIO_ROOT_USER=brunost",
             "MINIO_ROOT_PASSWORD=replace-with-a-long-random-password",
@@ -163,15 +156,14 @@ def helm_values_mapping(config: CountryConfig) -> dict[str, Any]:
             return os.environ.get(value[2:-1], value)
         return value
 
-    parsed = urlparse(config.public_url)
     return {
-        "platform": {"image": config.platform_image, "replicas": config.platform_replicas, "port": 3000},
         "judge": {
             "image": config.judge_image,
             "replicas": config.judge_replicas,
             "port": 8787,
             "apiToken": resolve("${BRUNOST_JUDGE_API_TOKEN}"),
             "callbackSigningSecret": resolve("${BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET}"),
+            "callbackHosts": list(config.callback_hosts),
         },
         "workers": [
             {
@@ -198,7 +190,7 @@ def helm_values_mapping(config: CountryConfig) -> dict[str, Any]:
         "ingress": {
             "enabled": config.tls,
             "className": "nginx",
-            "host": parsed.hostname or "contest.example.org",
+            "host": urlparse(config.public_url).hostname or "judge.example.org",
             "tlsSecret": "brunost-tls",
         },
         "monitoring": {"enabled": config.monitoring},

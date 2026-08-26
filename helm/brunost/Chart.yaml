@@ -1,6 +1,6 @@
 apiVersion: v2
 name: brunost
-description: Distributed Brunost Platform and Judge control plane
+description: Distributed Brunost Judge control plane and worker deployment
 type: application
 version: 0.1.0
 appVersion: "0.1.0"

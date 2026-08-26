@@ -12,7 +12,7 @@ from brunostctl.render import compose_mapping, helm_values_mapping
 def _production_mapping() -> dict:
     digest = "a" * 64
     mapping = preset_mapping("small", cluster_name="test", public_url="https://contest.test")
-    mapping["platform"]["image"] = f"ghcr.io/example/platform@sha256:{digest}"
+    mapping["judge"]["callback_hosts"] = ["premium.example.org"]
     mapping["judge"]["image"] = f"ghcr.io/example/judge@sha256:{digest}"
     mapping["judge"]["worker_image"] = f"ghcr.io/example/judge@sha256:{digest}"
     mapping["storage"]["postgres_image"] = f"postgres@sha256:{digest}"
@@ -36,9 +36,13 @@ def test_country_config_round_trips_and_strict_checks_images():
 def test_compose_contains_control_plane_workers_and_shared_postgres():
     config = CountryConfig.from_mapping(preset_mapping("small", cluster_name="test", public_url="https://test.example"))
     rendered = compose_mapping(config)
-    assert {"platform", "judge", "postgres", "minio", "worker-cpu-1", "worker-gpu-1"} <= set(rendered["services"])
+    assert {"judge", "postgres", "minio", "worker-cpu-1", "worker-gpu-1"} <= set(rendered["services"])
+    assert "platform" not in rendered["services"]
     assert rendered["services"]["judge"]["depends_on"] == ["postgres"]
     assert rendered["services"]["worker-gpu-1"]["environment"]["BRUNOST_WORKER_RESOURCE_CLASSES"] == "gpu,cpu"
+    assert rendered["services"]["judge"]["environment"]["BRUNOST_JUDGE_CALLBACK_HOSTS"] == "premium"
+    assert "BRUNOST_JUDGE_API_TOKEN" not in rendered["services"]["worker-gpu-1"]["environment"]
+    assert "BRUNOST_JUDGE_DATABASE_URL" not in rendered["services"]["worker-gpu-1"]["environment"]
 
 
 def test_helm_values_preserve_topology_images_and_replicas(monkeypatch: pytest.MonkeyPatch):
@@ -46,9 +50,11 @@ def test_helm_values_preserve_topology_images_and_replicas(monkeypatch: pytest.M
     monkeypatch.setenv("BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET", "callback-secret")
     config = CountryConfig.from_mapping(_production_mapping())
     values = helm_values_mapping(config)
-    assert values["platform"]["replicas"] == 1
+    assert "platform" not in values
+    assert values["judge"]["replicas"] == 1
     assert values["judge"]["image"] == config.judge_image
     assert values["judge"]["apiToken"] == "judge-token"
+    assert values["judge"]["callbackHosts"] == ["premium.example.org"]
     assert next(worker for worker in values["workers"] if worker["name"] == "gpu-1")["resourceClasses"] == ["gpu", "cpu"]
 
 
@@ -64,7 +70,7 @@ def test_init_renders_operator_bundle(tmp_path: Path):
 def test_k3s_install_uses_bundled_chart_and_node_files(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     digest = "b" * 64
     mapping = preset_mapping("ha-5-node", cluster_name="ha-test", public_url="https://ha.test")
-    mapping["platform"]["image"] = f"ghcr.io/example/platform@sha256:{digest}"
+    mapping["judge"]["callback_hosts"] = ["premium.example.org"]
     mapping["judge"]["image"] = f"ghcr.io/example/judge@sha256:{digest}"
     mapping["judge"]["worker_image"] = f"ghcr.io/example/judge@sha256:{digest}"
     (tmp_path / "brunost.yaml").write_text(yaml.safe_dump(mapping, sort_keys=False), encoding="utf-8")

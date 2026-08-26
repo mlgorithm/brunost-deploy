@@ -1,7 +1,7 @@
 services:
   judge-api:
     image: ${BRUNOST_JUDGE_IMAGE:?set BRUNOST_JUDGE_IMAGE to a digest-pinned image}
-    command: ["server", "--host", "0.0.0.0", "--port", "8787"]
+    command: ["brunost", "server", "--host", "0.0.0.0", "--port", "8787"]
     environment:
       BRUNOST_JUDGE_DATABASE_URL: ${BRUNOST_JUDGE_DATABASE_URL:?set BRUNOST_JUDGE_DATABASE_URL}
       BRUNOST_JUDGE_API_TOKEN: ${BRUNOST_JUDGE_API_TOKEN:?set BRUNOST_JUDGE_API_TOKEN}
@@ -22,7 +22,7 @@ services:
     ports:
       - "${BRUNOST_JUDGE_BIND:-127.0.0.1}:8787:8787"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/healthz', timeout=5).read()"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/readyz', timeout=5).read()"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -32,38 +32,6 @@ services:
       - /tmp
     security_opt:
       - no-new-privileges:true
-    restart: unless-stopped
-
-  platform:
-    image: ${BRUNOST_PLATFORM_IMAGE:?set BRUNOST_PLATFORM_IMAGE to a digest-pinned image}
-    environment:
-      BRUNOST_JUDGE_URL: http://judge-api:8787
-      BRUNOST_JUDGE_API_TOKEN: ${BRUNOST_JUDGE_API_TOKEN:?set BRUNOST_JUDGE_API_TOKEN}
-      # Workers run on separate VMs, so callbacks must use the private compute
-      # address rather than the Docker-only service name.  The security group
-      # permits this port only from the worker group.
-      BRUNOST_PLATFORM_CALLBACK_URL: ${BRUNOST_PLATFORM_CALLBACK_URL:?set BRUNOST_PLATFORM_CALLBACK_URL to the private platform callback URL}
-      BRUNOST_PLATFORM_CALLBACK_TOKEN: ${BRUNOST_PLATFORM_CALLBACK_TOKEN:?set BRUNOST_PLATFORM_CALLBACK_TOKEN}
-      BRUNOST_JUDGE_CALLBACK_SECRET: ${BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET:?set BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET}
-      BRUNOST_PLATFORM_DATABASE: /var/lib/brunost/platform/platform.db
-      BRUNOST_SUBMISSION_ROOT: /var/lib/brunost/platform/submissions
-      BRUNOST_DEFAULT_ADMIN_EMAIL: ${BRUNOST_DEFAULT_ADMIN_EMAIL:?set BRUNOST_DEFAULT_ADMIN_EMAIL}
-      BRUNOST_DEFAULT_ADMIN_PASSWORD: ${BRUNOST_DEFAULT_ADMIN_PASSWORD:?set BRUNOST_DEFAULT_ADMIN_PASSWORD}
-      BRUNOST_DEFAULT_ADMIN_NAME: ${BRUNOST_DEFAULT_ADMIN_NAME:-Country operator}
-      BRUNOST_PLATFORM_EDITION: standalone
-      BRUNOST_PLATFORM_FEATURES: ""
-    ports:
-      - "${BRUNOST_PLATFORM_BIND:-0.0.0.0}:3000:3000"
-    volumes:
-      - platform-data:/var/lib/brunost/platform
-    read_only: true
-    tmpfs:
-      - /tmp
-    security_opt:
-      - no-new-privileges:true
-    depends_on:
-      judge-api:
-        condition: service_healthy
     restart: unless-stopped
 
   docker-socket-proxy:
@@ -114,6 +82,3 @@ services:
     depends_on:
       - docker-socket-proxy
     restart: unless-stopped
-
-volumes:
-  platform-data:

@@ -1,17 +1,13 @@
 nameOverride: ""
 fullnameOverride: ""
 
-platform:
-  image: ghcr.io/mlgorithm/brunost-platform@sha256:<64-hex-digest>
-  replicas: 3
-  port: 3000
-
 judge:
   image: ghcr.io/mlgorithm/brunost-judge@sha256:<64-hex-digest>
   replicas: 2
   port: 8787
   apiToken: replace-me
   callbackSigningSecret: replace-me
+  callbackHosts: [premium.example.org]
 
 workers:
   - name: cpu

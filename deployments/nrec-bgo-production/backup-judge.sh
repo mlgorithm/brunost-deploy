@@ -54,7 +54,7 @@ docker run --rm --network "$network" --entrypoint /bin/sh \
     mc mirror --overwrite "data/$JUDGE_BUCKET" /backup/objects/artifacts
   '
 
-sha256sum "$work_dir/postgres.dump" > "$work_dir/SHA256SUMS"
+(cd "$work_dir" && sha256sum postgres.dump > SHA256SUMS)
 cat > "$work_dir/manifest.json" <<JSON
 {
   "created_at": "$timestamp",
@@ -63,7 +63,7 @@ cat > "$work_dir/manifest.json" <<JSON
   "postgres_dump": "postgres.dump"
 }
 JSON
-find "$work_dir" -type f ! -name 'SHA256SUMS.all' -print0 | sort -z | xargs -0 sha256sum > "$work_dir/SHA256SUMS.all"
+(cd "$work_dir" && find . -type f ! -name 'SHA256SUMS.all' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.all)
 mv "$work_dir" "$backup_dir"
 ln -sfn "$backup_dir" "$backup_root/latest"
 

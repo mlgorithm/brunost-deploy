@@ -18,7 +18,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ include "brunost.fullname" . }}-platform
+                name: {{ include "brunost.fullname" . }}-judge
                 port:
                   name: http
 {{- end }}

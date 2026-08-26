@@ -45,11 +45,10 @@ class CountryConfig:
     name: str
     public_url: str
     backend: str = "compose"
-    platform_replicas: int = 1
     judge_replicas: int = 1
-    platform_image: str = "ghcr.io/mlgorithm/brunost-platform:stable"
     judge_image: str = "ghcr.io/mlgorithm/brunost-judge:0.8.0"
     worker_image: str = "ghcr.io/mlgorithm/brunost-judge:0.8.0"
+    callback_hosts: tuple[str, ...] = ("premium",)
     workers: tuple[WorkerConfig, ...] = field(default_factory=tuple)
     storage: StorageConfig = field(default_factory=StorageConfig)
     tls: bool = True
@@ -74,14 +73,15 @@ class CountryConfig:
         if raw.get("version") != 1:
             raise ConfigError("version: 1 is required")
         cluster = raw.get("cluster") or {}
-        platform = raw.get("platform") or {}
         judge = raw.get("judge") or {}
         storage_raw = raw.get("storage") or {}
         workers_raw = raw.get("workers") or []
-        for name, value in (("cluster", cluster), ("platform", platform), ("judge", judge), ("storage", storage_raw)):
+        for name, value in (("cluster", cluster), ("judge", judge), ("storage", storage_raw)):
             if not isinstance(value, dict):
                 raise ConfigError(f"{name} must be a mapping")
-        for name in ("security", "observability", "backup"):
+        if "platform" in raw:
+            raise ConfigError("the deployment layer manages Judge and workers only; remove the obsolete platform section")
+        for name in ("security", "observability", "backup", "integrations"):
             if raw.get(name) is not None and not isinstance(raw[name], dict):
                 raise ConfigError(f"{name} must be a mapping")
         if not isinstance(workers_raw, list):
@@ -100,16 +100,18 @@ class CountryConfig:
                     replicas=int(item.get("replicas", 1)),
                 )
             )
+        callback_hosts = judge.get("callback_hosts", (raw.get("integrations") or {}).get("judge_callback_hosts", ["premium"]))
+        if not isinstance(callback_hosts, (list, tuple)):
+            raise ConfigError("judge.callback_hosts must be a list")
         config = cls(
             version=1,
             name=str(cluster.get("name", "brunost-country")),
             public_url=str(cluster.get("public_url", "https://localhost")),
             backend=str(raw.get("backend", "compose")),
-            platform_replicas=int(platform.get("replicas", 1)),
             judge_replicas=int(judge.get("replicas", 1)),
-            platform_image=str(platform.get("image", "ghcr.io/mlgorithm/brunost-platform:stable")),
             judge_image=str(judge.get("image", "ghcr.io/mlgorithm/brunost-judge:0.8.0")),
             worker_image=str(judge.get("worker_image", judge.get("image", "ghcr.io/mlgorithm/brunost-judge:0.8.0"))),
+            callback_hosts=tuple(str(value).strip().lower() for value in callback_hosts if str(value).strip()),
             workers=tuple(workers),
             storage=StorageConfig(
                 postgres=str(storage_raw.get("postgres", "bundled")),
@@ -139,8 +141,13 @@ class CountryConfig:
             errors.append("TLS is enabled but cluster.public_url is not HTTPS")
         if self.backend not in {"compose", "k3s"}:
             errors.append("backend must be compose or k3s")
-        if self.platform_replicas < 1 or self.judge_replicas < 1:
-            errors.append("platform and judge replicas must be positive")
+        if self.judge_replicas < 1:
+            errors.append("judge replicas must be positive")
+        if not self.callback_hosts:
+            errors.append("judge.callback_hosts must contain at least one callback hostname")
+        for host in self.callback_hosts:
+            if "/" in host or ":" in host or any(character.isspace() for character in host):
+                errors.append(f"judge callback host {host!r} must be a hostname, not a URL")
         names = [worker.name for worker in self.workers]
         if len(names) != len(set(names)):
             errors.append("worker names must be unique")
@@ -164,8 +171,10 @@ class CountryConfig:
             errors.append("K3s production requires external or replicated PostgreSQL")
         if strict and self.backend == "k3s" and self.storage.artifacts not in {"s3", "external"}:
             errors.append("K3s production requires S3-compatible shared artifact storage")
+        if strict and self.callback_hosts == ("premium",):
+            errors.append("judge.callback_hosts must be replaced with the real Premium callback hostname")
         if strict:
-            for label, image in (("platform", self.platform_image), ("judge", self.judge_image), ("worker", self.worker_image)):
+            for label, image in (("judge", self.judge_image), ("worker", self.worker_image)):
                 digest = image.rsplit(IMAGE_DIGEST, 1)[-1] if IMAGE_DIGEST in image else ""
                 if len(digest) != 64 or any(character not in "0123456789abcdefABCDEF" for character in digest):
                     errors.append(f"{label}.image must be pinned by a 64-character sha256 digest")
@@ -175,7 +184,7 @@ class CountryConfig:
                 for label, image in (("storage.artifacts_image", self.storage.artifacts_image), ("storage.artifacts_init_image", self.storage.artifacts_init_image)):
                     if "@sha256:" not in image:
                         errors.append(f"{label} must be digest-pinned")
-        if strict and self.backend == "compose" and (self.platform_replicas > 1 or self.judge_replicas > 1):
+        if strict and self.backend == "compose" and self.judge_replicas > 1:
             errors.append("Compose replicas require Docker Swarm; use backend: k3s for multi-node HA")
         if errors:
             raise ConfigError("; ".join(errors))
@@ -186,8 +195,12 @@ class CountryConfig:
             "version": 1,
             "cluster": {"name": self.name, "public_url": self.public_url},
             "backend": self.backend,
-            "platform": {"replicas": self.platform_replicas, "image": self.platform_image},
-            "judge": {"replicas": self.judge_replicas, "image": self.judge_image, "worker_image": self.worker_image},
+            "judge": {
+                "replicas": self.judge_replicas,
+                "image": self.judge_image,
+                "worker_image": self.worker_image,
+                "callback_hosts": list(self.callback_hosts),
+            },
             "workers": [
                 {
                     "name": worker.name,

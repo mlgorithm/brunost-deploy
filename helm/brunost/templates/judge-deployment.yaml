@@ -49,6 +49,10 @@ spec:
               value: "true"
             - name: BRUNOST_JUDGE_REQUIRE_WORKER_TOKEN
               value: "true"
+            - name: BRUNOST_JUDGE_ENV
+              value: production
+            - name: BRUNOST_JUDGE_REQUIRE_IMMUTABLE_ARTIFACTS
+              value: "true"
             - name: BRUNOST_JUDGE_CLUSTER_ID
               value: {{ .Release.Name | quote }}
             - name: BRUNOST_JUDGE_ARTIFACT_BACKEND
@@ -68,7 +72,7 @@ spec:
                   name: {{ include "brunost.fullname" . }}-judge
                   key: artifact-secret-key
             - name: BRUNOST_JUDGE_CALLBACK_HOSTS
-              value: {{ include "brunost.fullname" . }}-platform
+              value: {{ join "," .Values.judge.callbackHosts | quote }}
           readinessProbe:
             httpGet:
               path: /healthz

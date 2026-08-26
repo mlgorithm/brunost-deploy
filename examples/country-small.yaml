@@ -6,14 +6,11 @@ cluster:
 
 backend: compose
 
-platform:
-  replicas: 1
-  image: ghcr.io/mlgorithm/brunost-platform@sha256:<64-hex-digest>
-
 judge:
   replicas: 1
   image: ghcr.io/mlgorithm/brunost-judge@sha256:<64-hex-digest>
   worker_image: ghcr.io/mlgorithm/brunost-judge@sha256:<64-hex-digest>
+  callback_hosts: [premium.example.org]
 
 workers:
   - name: cpu-1

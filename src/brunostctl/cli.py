@@ -193,7 +193,7 @@ def build_parser() -> argparse.ArgumentParser:
         lifecycle.add_argument("--release", help="release identifier for upgrade/rollback")
         lifecycle.add_argument("--dry-run", action="store_true")
 
-    status = sub.add_parser("status", help="inspect control-plane health")
+    status = sub.add_parser("status", help="inspect Judge readiness")
     status.add_argument("--url", default=os.environ.get("BRUNOST_JUDGE_URL", "http://127.0.0.1:8787"))
     status.add_argument("--token", default=os.environ.get("BRUNOST_JUDGE_API_TOKEN"))
 
@@ -305,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
                 command = ["helm", "rollback", config.name, args.release, "--namespace", config.name] if config.backend == "k3s" else ["docker", "compose", "--env-file", ".env", "-f", ".brunost/rendered/docker-compose.yml", "up", "-d"]
             return _run(command, cwd=args.config.parent, dry_run=args.dry_run)
         if args.command == "status":
-            result = _json_request(args.url.rstrip("/") + "/healthz", token=args.token)
+            result = _json_request(args.url.rstrip("/") + "/readyz", token=args.token)
             print(json.dumps(result, indent=2, sort_keys=True))
             return 0
         if args.command == "node":
