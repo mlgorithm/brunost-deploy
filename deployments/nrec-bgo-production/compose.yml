@@ -1,7 +1,7 @@
 services:
   judge-api:
     image: ${BRUNOST_JUDGE_IMAGE:?set BRUNOST_JUDGE_IMAGE to a digest-pinned image}
-    command: ["brunost", "server", "--host", "0.0.0.0", "--port", "8787"]
+    command: ["server", "--host", "0.0.0.0", "--port", "8787"]
     environment:
       BRUNOST_JUDGE_DATABASE_URL: ${BRUNOST_JUDGE_DATABASE_URL:?set BRUNOST_JUDGE_DATABASE_URL}
       BRUNOST_JUDGE_API_TOKEN: ${BRUNOST_JUDGE_API_TOKEN:?set BRUNOST_JUDGE_API_TOKEN}
