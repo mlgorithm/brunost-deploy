@@ -36,9 +36,11 @@ def test_country_config_round_trips_and_strict_checks_images():
 def test_compose_contains_control_plane_workers_and_shared_postgres():
     config = CountryConfig.from_mapping(preset_mapping("small", cluster_name="test", public_url="https://test.example"))
     rendered = compose_mapping(config)
-    assert {"judge", "postgres", "minio", "worker-cpu-1", "worker-gpu-1"} <= set(rendered["services"])
+    assert {"judge", "callback-dispatcher", "postgres", "minio", "worker-cpu-1", "worker-gpu-1"} <= set(rendered["services"])
     assert "platform" not in rendered["services"]
     assert rendered["services"]["judge"]["depends_on"] == ["postgres"]
+    assert rendered["services"]["callback-dispatcher"]["environment"]["BRUNOST_JUDGE_REQUIRE_SIGNED_CALLBACKS"] == "true"
+    assert "BRUNOST_JUDGE_API_TOKEN" not in rendered["services"]["callback-dispatcher"]["environment"]
     assert rendered["services"]["worker-gpu-1"]["environment"]["BRUNOST_WORKER_RESOURCE_CLASSES"] == "gpu,cpu"
     assert rendered["services"]["judge"]["environment"]["BRUNOST_JUDGE_CALLBACK_HOSTS"] == "premium"
     assert "BRUNOST_JUDGE_API_TOKEN" not in rendered["services"]["worker-gpu-1"]["environment"]

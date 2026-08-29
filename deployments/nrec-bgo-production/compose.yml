@@ -16,6 +16,7 @@ services:
       BRUNOST_JUDGE_ARTIFACT_SECRET_KEY: ${BRUNOST_JUDGE_ARTIFACT_SECRET_KEY:?set BRUNOST_JUDGE_ARTIFACT_SECRET_KEY}
       BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET: ${BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET:?set BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET}
       BRUNOST_JUDGE_CALLBACK_HOSTS: ${BRUNOST_JUDGE_CALLBACK_HOSTS:?set BRUNOST_JUDGE_CALLBACK_HOSTS}
+      BRUNOST_JUDGE_REQUIRE_SIGNED_CALLBACKS: "true"
       BRUNOST_JUDGE_REQUIRE_HTTPS_CALLBACKS: "true"
       BRUNOST_JUDGE_ALLOW_INTERNAL_HTTP_CALLBACKS: ${BRUNOST_JUDGE_ALLOW_INTERNAL_HTTP_CALLBACKS:-false}
       BRUNOST_JUDGE_ENV: production
@@ -32,6 +33,24 @@ services:
       - /tmp
     security_opt:
       - no-new-privileges:true
+    restart: unless-stopped
+
+  callback-dispatcher:
+    image: ${BRUNOST_JUDGE_IMAGE:?set BRUNOST_JUDGE_IMAGE to a digest-pinned image}
+    command: ["callback-dispatcher", "--poll-seconds", "1"]
+    environment:
+      BRUNOST_JUDGE_DATABASE_URL: ${BRUNOST_JUDGE_DATABASE_URL:?set BRUNOST_JUDGE_DATABASE_URL}
+      BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET: ${BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET:?set BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET}
+      BRUNOST_JUDGE_REQUIRE_SIGNED_CALLBACKS: "true"
+      BRUNOST_JUDGE_ENV: production
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      judge-api:
+        condition: service_healthy
     restart: unless-stopped
 
   docker-socket-proxy:
@@ -67,6 +86,7 @@ services:
       BRUNOST_JUDGE_SANDBOX_CPUS: "2"
       BRUNOST_JUDGE_SANDBOX_PIDS_LIMIT: "256"
       BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET: ${BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET:?set BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET}
+      BRUNOST_JUDGE_REQUIRE_SIGNED_CALLBACKS: "true"
       BRUNOST_JUDGE_ENV: production
       BRUNOST_JUDGE_REQUIRE_IMMUTABLE_ARTIFACTS: "true"
       DOCKER_HOST: tcp://docker-socket-proxy:2375

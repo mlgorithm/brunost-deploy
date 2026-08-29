@@ -20,6 +20,7 @@ def _environment(config: CountryConfig, *, control_plane: bool) -> dict[str, str
         "BRUNOST_JUDGE_ENV": "production",
         "BRUNOST_JUDGE_REQUIRE_IMMUTABLE_ARTIFACTS": "true",
         "BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET": "${BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET}",
+        "BRUNOST_JUDGE_REQUIRE_SIGNED_CALLBACKS": "true",
         "BRUNOST_JUDGE_CALLBACK_HOSTS": ",".join(config.callback_hosts),
         "BRUNOST_JUDGE_CLUSTER_ID": config.name,
         "BRUNOST_JUDGE_ARTIFACT_BACKEND": artifact_backend,
@@ -57,6 +58,29 @@ def compose_mapping(config: CountryConfig) -> dict[str, Any]:
             "restart": "unless-stopped",
             "deploy": {"replicas": config.judge_replicas},
         },
+    }
+    postgres = (
+        "${BRUNOST_POSTGRES_URL}"
+        if config.storage.postgres == "external"
+        else "postgresql://brunost:${POSTGRES_PASSWORD}@postgres:5432/brunost"
+    )
+    services["callback-dispatcher"] = {
+        "image": config.judge_image,
+        # Callback delivery is a control-plane responsibility. Keeping it in
+        # its own process makes retries survive worker loss without granting
+        # the dispatcher sandbox or API credentials.
+        "command": ["callback-dispatcher", "--poll-seconds", "1"],
+        "environment": {
+            "BRUNOST_JUDGE_DATABASE_URL": postgres,
+            "BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET": "${BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET}",
+            "BRUNOST_JUDGE_REQUIRE_SIGNED_CALLBACKS": "true",
+            "BRUNOST_JUDGE_ENV": "production",
+        },
+        "read_only": True,
+        "tmpfs": ["/tmp"],
+        "security_opt": ["no-new-privileges:true"],
+        "depends_on": ["judge"],
+        "restart": "unless-stopped",
     }
     if config.storage.postgres == "bundled":
         services["postgres"] = {

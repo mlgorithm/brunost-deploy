@@ -8,6 +8,8 @@ deploy the Premium API or any Premium database.
   object-storage credentials.
 - `brunost-worker-cpu-01` and `brunost-worker-cpu-02` are enrolled as separate
   Judge workers.
+- the Judge control plane runs a durable callback dispatcher so a worker loss
+  after finishing an execution cannot lose the Premium result notification.
 - The control-plane port is private and restricted to the worker security group.
 - Judge callback delivery is allowlisted to the Premium callback hostname; the
   Premium API owns the callback endpoint and worker `.env` files must include

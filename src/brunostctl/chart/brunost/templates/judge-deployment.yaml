@@ -53,6 +53,8 @@ spec:
               value: production
             - name: BRUNOST_JUDGE_REQUIRE_IMMUTABLE_ARTIFACTS
               value: "true"
+            - name: BRUNOST_JUDGE_REQUIRE_SIGNED_CALLBACKS
+              value: "true"
             - name: BRUNOST_JUDGE_CLUSTER_ID
               value: {{ .Release.Name | quote }}
             - name: BRUNOST_JUDGE_ARTIFACT_BACKEND
