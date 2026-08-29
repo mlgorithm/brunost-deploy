@@ -70,6 +70,7 @@ def compose_mapping(config: CountryConfig) -> dict[str, Any]:
         # its own process makes retries survive worker loss without granting
         # the dispatcher sandbox or API credentials.
         "command": ["callback-dispatcher", "--poll-seconds", "1"],
+        "healthcheck": {"disable": True},
         "environment": {
             "BRUNOST_JUDGE_DATABASE_URL": postgres,
             "BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET": "${BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET}",

@@ -38,6 +38,10 @@ services:
   callback-dispatcher:
     image: ${BRUNOST_JUDGE_IMAGE:?set BRUNOST_JUDGE_IMAGE to a digest-pinned image}
     command: ["callback-dispatcher", "--poll-seconds", "1"]
+    # The shared Judge image contains the API healthcheck, but the dispatcher
+    # is a background process and intentionally does not listen on HTTP.
+    healthcheck:
+      disable: true
     environment:
       BRUNOST_JUDGE_DATABASE_URL: ${BRUNOST_JUDGE_DATABASE_URL:?set BRUNOST_JUDGE_DATABASE_URL}
       BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET: ${BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET:?set BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET}
