@@ -114,7 +114,9 @@ services:
       BRUNOST_JUDGE_ENV: production
       BRUNOST_JUDGE_REQUIRE_IMMUTABLE_ARTIFACTS: "true"
       BRUNOST_JUDGE_ALLOW_INSECURE_HTTP: "true"
-      BRUNOST_JUDGE_INTERNAL_HTTP_HOSTS: judge
+      # The control-plane worker uses the Compose service name; remote NREC
+      # workers use the control-plane address from their node credential.
+      BRUNOST_JUDGE_INTERNAL_HTTP_HOSTS: judge,judge-api,158.37.65.202
       DOCKER_HOST: tcp://docker-socket-proxy:2375
       TMPDIR: /srv/brunost-judge/workspaces
     volumes:
