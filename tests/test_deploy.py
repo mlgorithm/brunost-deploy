@@ -57,6 +57,7 @@ def test_synchronization_checks_cover_durable_signed_callback_delivery():
     config = CountryConfig.from_mapping(preset_mapping("small", cluster_name="test", public_url="https://test.example"))
     checks = synchronization_checks(config)
     assert checks["callback_hosts"] == ["premium"]
+    assert checks["idempotency_header_required"] is True
     assert all(checks["callback_dispatcher"].values())
     assert checks["workers"]["socket_proxy_present"] is True
     assert checks["observability"]["worker_healthchecks"] is True

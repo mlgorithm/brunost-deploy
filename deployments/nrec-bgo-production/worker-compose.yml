@@ -42,6 +42,8 @@ services:
       BRUNOST_JUDGE_REQUIRE_SIGNED_CALLBACKS: "true"
       BRUNOST_JUDGE_ENV: production
       BRUNOST_JUDGE_REQUIRE_IMMUTABLE_ARTIFACTS: "true"
+      BRUNOST_JUDGE_ALLOW_INSECURE_HTTP: "true"
+      BRUNOST_JUDGE_INTERNAL_HTTP_HOSTS: judge
       DOCKER_HOST: tcp://docker-socket-proxy:2375
       TMPDIR: /srv/brunost-judge/workspaces
     volumes:

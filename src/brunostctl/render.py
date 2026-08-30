@@ -40,6 +40,7 @@ def _environment(config: CountryConfig, *, control_plane: bool) -> dict[str, str
                 "BRUNOST_JUDGE_DATABASE_URL": postgres,
                 "BRUNOST_JUDGE_API_TOKEN": "${BRUNOST_JUDGE_API_TOKEN}",
                 "BRUNOST_JUDGE_REQUIRE_API_TOKEN": "true",
+                "BRUNOST_JUDGE_REQUIRE_IDEMPOTENCY_HEADER": "true",
                 "BRUNOST_JUDGE_CALLBACK_HOSTS": ",".join(config.callback_hosts),
             }
         )
@@ -169,6 +170,10 @@ def compose_mapping(config: CountryConfig) -> dict[str, Any]:
             "environment": {
                 **_environment(config, control_plane=False),
                 "BRUNOST_JUDGE_URL": "http://judge:8787",
+                # This is an explicit, allowlisted Docker-network exception;
+                # all external Premium/control-plane traffic remains HTTPS.
+                "BRUNOST_JUDGE_ALLOW_INSECURE_HTTP": "true",
+                "BRUNOST_JUDGE_INTERNAL_HTTP_HOSTS": "judge",
                 "BRUNOST_WORKER_QUEUES": ",".join(worker.queues),
                 "BRUNOST_WORKER_RESOURCE_CLASSES": ",".join(worker.resource_classes),
                 "BRUNOST_WORKER_REGION": worker.region or "",
@@ -240,6 +245,7 @@ def synchronization_checks(config: CountryConfig) -> dict[str, Any]:
     dispatcher_command = dispatcher.get("command", [])
     return {
         "callback_hosts": list(config.callback_hosts),
+        "idempotency_header_required": judge_environment.get("BRUNOST_JUDGE_REQUIRE_IDEMPOTENCY_HEADER") == "true",
         "callback_dispatcher": {
             "present": bool(dispatcher),
             "command_is_dispatcher": dispatcher_command[:1] == ["callback-dispatcher"],
