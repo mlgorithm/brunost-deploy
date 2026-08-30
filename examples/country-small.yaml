@@ -39,3 +39,7 @@ observability:
 
 backup:
   schedule: "0 2 * * *"
+
+operations:
+  worker_drain_timeout_seconds: 900
+  worker_termination_grace_seconds: 900
