@@ -143,6 +143,34 @@ def compose_mapping(config: CountryConfig) -> dict[str, Any]:
     return {"name": config.name, "services": services, **({"volumes": volumes} if volumes else {})}
 
 
+def synchronization_checks(config: CountryConfig) -> dict[str, Any]:
+    """Return non-secret checks for the Premium callback delivery path.
+
+    This inspects the rendered Compose model in memory. It deliberately does
+    not contact either application or mutate the deployment, which makes it
+    suitable for the operator's pre-cutover verification workflow.
+    """
+    services = compose_mapping(config)["services"]
+    judge = services.get("judge", {})
+    dispatcher = services.get("callback-dispatcher", {})
+    judge_environment = judge.get("environment", {})
+    dispatcher_environment = dispatcher.get("environment", {})
+    dispatcher_command = dispatcher.get("command", [])
+    return {
+        "callback_hosts": list(config.callback_hosts),
+        "callback_dispatcher": {
+            "present": bool(dispatcher),
+            "command_is_dispatcher": dispatcher_command[:1] == ["callback-dispatcher"],
+            "image_matches_judge": dispatcher.get("image") == judge.get("image"),
+            "shared_database": dispatcher_environment.get("BRUNOST_JUDGE_DATABASE_URL")
+            == judge_environment.get("BRUNOST_JUDGE_DATABASE_URL"),
+            "signed_callbacks_required": judge_environment.get("BRUNOST_JUDGE_REQUIRE_SIGNED_CALLBACKS") == "true"
+            and dispatcher_environment.get("BRUNOST_JUDGE_REQUIRE_SIGNED_CALLBACKS") == "true",
+            "restart_policy": dispatcher.get("restart") == "unless-stopped",
+        },
+    }
+
+
 def render_compose(config: CountryConfig) -> str:
     return yaml.safe_dump(compose_mapping(config), sort_keys=False, default_flow_style=False)
 

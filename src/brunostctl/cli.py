@@ -24,7 +24,7 @@ import yaml
 
 from brunostctl.config import ConfigError, CountryConfig
 from brunostctl.presets import preset_mapping
-from brunostctl.render import helm_values_mapping, render_compose, render_env
+from brunostctl.render import helm_values_mapping, render_compose, render_env, synchronization_checks
 
 
 def _json_request(url: str, *, method: str = "GET", token: str | None = None, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -197,6 +197,13 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--url", default=os.environ.get("BRUNOST_JUDGE_URL", "http://127.0.0.1:8787"))
     status.add_argument("--token", default=os.environ.get("BRUNOST_JUDGE_API_TOKEN"))
 
+    verify = sub.add_parser("verify", help="read-only verify Premium/Judge synchronization prerequisites")
+    verify.add_argument("--config", type=Path, default=Path("brunost.yaml"))
+    verify.add_argument("--url", default=os.environ.get("BRUNOST_JUDGE_URL", "http://127.0.0.1:8787"), help="Judge base URL")
+    verify.add_argument("--token", default=os.environ.get("BRUNOST_JUDGE_API_TOKEN"), help="Judge API token")
+    verify.add_argument("--premium-url", help="optional Premium base URL to check /readyz")
+    verify.add_argument("--premium-token", default=os.environ.get("BRUNOST_PREMIUM_API_TOKEN"), help="optional Premium readiness token")
+
     node = sub.add_parser("node", help="enroll, inspect, or revoke a worker node")
     node_sub = node.add_subparsers(dest="node_command", required=True)
     issue = node_sub.add_parser("issue", help="issue a one-time join token")
@@ -304,6 +311,32 @@ def main(argv: list[str] | None = None) -> int:
                     raise ConfigError("rollback requires --release")
                 command = ["helm", "rollback", config.name, args.release, "--namespace", config.name] if config.backend == "k3s" else ["docker", "compose", "--env-file", ".env", "-f", ".brunost/rendered/docker-compose.yml", "up", "-d"]
             return _run(command, cwd=args.config.parent, dry_run=args.dry_run)
+        if args.command == "verify":
+            _load_dotenv(args.config.parent)
+            config = _load_config(args.config, strict=True)
+            judge_token = args.token or os.environ.get("BRUNOST_JUDGE_API_TOKEN")
+            premium_token = args.premium_token or os.environ.get("BRUNOST_PREMIUM_API_TOKEN")
+            checks = synchronization_checks(config)
+            dispatcher_checks = checks["callback_dispatcher"]
+            failed_checks = [name for name, passed in dispatcher_checks.items() if not passed]
+            if failed_checks:
+                raise ConfigError("callback synchronization configuration failed: " + ", ".join(failed_checks))
+            result: dict[str, Any] = {
+                "status": "ok",
+                "cluster": config.name,
+                "synchronization": checks,
+                "judge": {
+                    "url": args.url.rstrip("/"),
+                    "ready": _json_request(args.url.rstrip("/") + "/readyz", token=judge_token),
+                },
+            }
+            if args.premium_url:
+                result["premium"] = {
+                    "url": args.premium_url.rstrip("/"),
+                    "ready": _json_request(args.premium_url.rstrip("/") + "/readyz", token=premium_token),
+                }
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return 0
         if args.command == "status":
             result = _json_request(args.url.rstrip("/") + "/readyz", token=args.token)
             print(json.dumps(result, indent=2, sort_keys=True))

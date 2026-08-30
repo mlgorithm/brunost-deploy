@@ -51,6 +51,9 @@ cuda`. No application code or database edits are needed.
 brunostctl install --dry-run
 brunostctl install
 brunostctl status --url https://judge.example.org --token "$BRUNOST_JUDGE_API_TOKEN"
+brunostctl verify --config brunost.yaml \
+  --url https://judge.example.org --token "$BRUNOST_JUDGE_API_TOKEN" \
+  --premium-url https://premium.example.org
 brunostctl backup --dry-run
 brunostctl upgrade --release 2026.08.1 --dry-run
 brunostctl rollback --release 4 --dry-run
@@ -82,6 +85,13 @@ Premium owns users, contests, permissions, UI, submissions, and leaderboard
 policy. The Judge control plane owns evaluations, worker registry, scheduling,
 and execution state. Workers only execute sandboxed tasks. This repository
 owns deployment lifecycle; it does not duplicate either domain.
+
+`brunostctl verify` is a read-only pre-cutover check. It validates that the
+rendered deployment has a durable callback dispatcher using the same Judge
+image and database, requires signed callbacks, and has an explicit Premium
+callback allowlist. It then checks Judge `/readyz` and, when `--premium-url` is
+provided, Premium `/readyz`. It does not create submissions, replay callbacks,
+or change either service.
 
 ## Task packages
 

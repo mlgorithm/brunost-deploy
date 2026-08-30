@@ -43,7 +43,19 @@ plane. Premium must use the same value as
 Configure Premium's `BRUNOST_JUDGE_URL`, `BRUNOST_JUDGE_API_TOKEN`,
 `BRUNOST_JUDGE_CALLBACK_URL`, `BRUNOST_JUDGE_CALLBACK_TOKEN`, and
 `BRUNOST_JUDGE_CALLBACK_SECRET` from the same deployment secret store. Verify
-Premium `/readyz`, Judge `/healthz`, one immutable artifact upload, one
+Premium `/readyz` and Judge `/readyz` before enabling contest traffic. If this
+profile is operated from a `brunostctl` topology bundle, run its read-only
+verification first:
+
+```bash
+brunostctl verify --config brunost.yaml \
+  --url "$BRUNOST_JUDGE_URL" --token "$BRUNOST_JUDGE_API_TOKEN" \
+  --premium-url "$BRUNOST_PREMIUM_URL"
+```
+
+The command checks the durable callback-dispatcher wiring and readiness only;
+it does not create submissions or replay callbacks. After that check, perform
+the separate controlled smoke test for one immutable artifact, one
 submission, and one signed callback before enabling contest traffic.
 
 ## Current NREC layout

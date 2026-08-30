@@ -31,6 +31,13 @@ spec:
               value: production
             - name: BRUNOST_JUDGE_REQUIRE_IMMUTABLE_ARTIFACTS
               value: "true"
+            - name: BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "brunost.fullname" $ }}-judge
+                  key: callback-secret
+            - name: BRUNOST_JUDGE_REQUIRE_SIGNED_CALLBACKS
+              value: "true"
             - name: BRUNOST_JUDGE_SANDBOX_MODE
               value: "docker"
             - name: BRUNOST_WORKER_QUEUES

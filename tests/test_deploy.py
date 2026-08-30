@@ -6,7 +6,7 @@ import yaml
 from brunostctl.cli import main
 from brunostctl.config import ConfigError, CountryConfig
 from brunostctl.presets import preset_mapping
-from brunostctl.render import compose_mapping, helm_values_mapping
+from brunostctl.render import compose_mapping, helm_values_mapping, synchronization_checks
 
 
 def _production_mapping() -> dict:
@@ -42,9 +42,29 @@ def test_compose_contains_control_plane_workers_and_shared_postgres():
     assert rendered["services"]["callback-dispatcher"]["environment"]["BRUNOST_JUDGE_REQUIRE_SIGNED_CALLBACKS"] == "true"
     assert "BRUNOST_JUDGE_API_TOKEN" not in rendered["services"]["callback-dispatcher"]["environment"]
     assert rendered["services"]["worker-gpu-1"]["environment"]["BRUNOST_WORKER_RESOURCE_CLASSES"] == "gpu,cpu"
+    assert rendered["services"]["worker-gpu-1"]["environment"]["BRUNOST_JUDGE_REQUIRE_SIGNED_CALLBACKS"] == "true"
+    assert "BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET" in rendered["services"]["worker-gpu-1"]["environment"]
     assert rendered["services"]["judge"]["environment"]["BRUNOST_JUDGE_CALLBACK_HOSTS"] == "premium"
     assert "BRUNOST_JUDGE_API_TOKEN" not in rendered["services"]["worker-gpu-1"]["environment"]
     assert "BRUNOST_JUDGE_DATABASE_URL" not in rendered["services"]["worker-gpu-1"]["environment"]
+
+
+def test_synchronization_checks_cover_durable_signed_callback_delivery():
+    config = CountryConfig.from_mapping(preset_mapping("small", cluster_name="test", public_url="https://test.example"))
+    checks = synchronization_checks(config)
+    assert checks["callback_hosts"] == ["premium"]
+    assert all(checks["callback_dispatcher"].values())
+
+
+def test_standalone_and_packaged_helm_charts_stay_in_sync():
+    root = Path(__file__).parents[1]
+    standalone = root / "helm" / "brunost"
+    packaged = root / "src" / "brunostctl" / "chart" / "brunost"
+    standalone_files = {path.relative_to(standalone) for path in standalone.rglob("*") if path.is_file()}
+    packaged_files = {path.relative_to(packaged) for path in packaged.rglob("*") if path.is_file()}
+    assert standalone_files == packaged_files
+    for relative in sorted(standalone_files):
+        assert (standalone / relative).read_bytes() == (packaged / relative).read_bytes()
 
 
 def test_helm_values_preserve_topology_images_and_replicas(monkeypatch: pytest.MonkeyPatch):
@@ -88,3 +108,53 @@ def test_k3s_install_uses_bundled_chart_and_node_files(tmp_path: Path, capsys: p
     )
     assert main(["install", "--config", str(tmp_path / "brunost.yaml"), "--dry-run"]) == 0
     assert ".brunost/chart" in capsys.readouterr().out
+
+
+def test_verify_is_read_only_and_checks_both_readiness_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
+    mapping = _production_mapping()
+    config_path = tmp_path / "brunost.yaml"
+    config_path.write_text(yaml.safe_dump(mapping, sort_keys=False), encoding="utf-8")
+    requests: list[tuple[str, str | None]] = []
+
+    def fake_request(url: str, *, method: str = "GET", token: str | None = None, payload: dict | None = None) -> dict:
+        assert method == "GET"
+        assert payload is None
+        requests.append((url, token))
+        return {"status": "ready"}
+
+    monkeypatch.setattr("brunostctl.cli._json_request", fake_request)
+    assert main(
+        [
+            "verify",
+            "--config",
+            str(config_path),
+            "--url",
+            "https://judge.test",
+            "--token",
+            "judge-token",
+            "--premium-url",
+            "https://premium.test",
+        ]
+    ) == 0
+    assert requests == [("https://judge.test/readyz", "judge-token"), ("https://premium.test/readyz", None)]
+    result = yaml.safe_load(capsys.readouterr().out)
+    assert result["status"] == "ok"
+    assert result["synchronization"]["callback_dispatcher"]["signed_callbacks_required"] is True
+    assert not (tmp_path / ".brunost").exists()
+
+
+def test_verify_loads_judge_token_from_operator_env_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    mapping = _production_mapping()
+    config_path = tmp_path / "brunost.yaml"
+    config_path.write_text(yaml.safe_dump(mapping, sort_keys=False), encoding="utf-8")
+    (tmp_path / ".env").write_text("BRUNOST_JUDGE_API_TOKEN=from-env-file\n", encoding="utf-8")
+    monkeypatch.delenv("BRUNOST_JUDGE_API_TOKEN", raising=False)
+    observed: list[str | None] = []
+
+    def fake_request(url: str, *, method: str = "GET", token: str | None = None, payload: dict | None = None) -> dict:
+        observed.append(token)
+        return {"status": "ready"}
+
+    monkeypatch.setattr("brunostctl.cli._json_request", fake_request)
+    assert main(["verify", "--config", str(config_path), "--url", "https://judge.test"]) == 0
+    assert observed == ["from-env-file"]
