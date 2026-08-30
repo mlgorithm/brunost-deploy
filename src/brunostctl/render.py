@@ -53,10 +53,26 @@ def compose_mapping(config: CountryConfig) -> dict[str, Any]:
             # The Judge image declares ``brunost`` as its entrypoint.
             "command": ["server", "--host", "0.0.0.0", "--port", "8787"],
             "environment": _environment(config, control_plane=True),
-            "ports": ["8787:8787"],
+            "ports": ["${BRUNOST_JUDGE_BIND:-127.0.0.1}:8787:8787"],
             "depends_on": ["postgres"] if config.storage.postgres == "bundled" else [],
+            "healthcheck": {
+                "test": ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/readyz', timeout=5).read()"],
+                "interval": "10s",
+                "timeout": "5s",
+                "retries": 12,
+                "start_period": "20s",
+            },
+            "stop_grace_period": f"{config.worker_termination_grace_seconds}s",
+            "init": True,
+            "stop_signal": "SIGTERM",
+            "logging": {"driver": "json-file", "options": {"max-size": "50m", "max-file": "5"}},
             "restart": "unless-stopped",
-            "deploy": {"replicas": config.judge_replicas},
+            "deploy": {
+                "replicas": config.judge_replicas,
+                "update_config": {"parallelism": 1, "order": "start-first", "failure_action": "rollback"},
+                "rollback_config": {"parallelism": 1, "order": "stop-first"},
+                "restart_policy": {"condition": "on-failure", "max_attempts": 3},
+            },
         },
     }
     postgres = (
@@ -70,7 +86,13 @@ def compose_mapping(config: CountryConfig) -> dict[str, Any]:
         # its own process makes retries survive worker loss without granting
         # the dispatcher sandbox or API credentials.
         "command": ["callback-dispatcher", "--poll-seconds", "1"],
-        "healthcheck": {"disable": True},
+        "healthcheck": {
+            "test": ["CMD-SHELL", "kill -0 1"],
+            "interval": "15s",
+            "timeout": "5s",
+            "retries": 3,
+            "start_period": "20s",
+        },
         "environment": {
             "BRUNOST_JUDGE_DATABASE_URL": postgres,
             "BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET": "${BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET}",
@@ -81,6 +103,10 @@ def compose_mapping(config: CountryConfig) -> dict[str, Any]:
         "tmpfs": ["/tmp"],
         "security_opt": ["no-new-privileges:true"],
         "depends_on": ["judge"],
+        "stop_grace_period": f"{config.worker_termination_grace_seconds}s",
+        "init": True,
+        "stop_signal": "SIGTERM",
+        "logging": {"driver": "json-file", "options": {"max-size": "25m", "max-file": "5"}},
         "restart": "unless-stopped",
     }
     if config.storage.postgres == "bundled":
@@ -111,6 +137,25 @@ def compose_mapping(config: CountryConfig) -> dict[str, Any]:
             "depends_on": ["minio"],
             "restart": "on-failure",
         }
+    if config.workers:
+        services["docker-socket-proxy"] = {
+            "image": "${BRUNOST_DOCKER_SOCKET_PROXY_IMAGE:?set BRUNOST_DOCKER_SOCKET_PROXY_IMAGE to a digest-pinned image}",
+            "environment": {
+                "CONTAINERS": "1",
+                "IMAGES": "1",
+                "INFO": "1",
+                "VERSION": "1",
+                "POST": "1",
+                "NETWORKS": "0",
+                "VOLUMES": "0",
+                "EXEC": "0",
+                "AUTH": "0",
+                "SECRETS": "0",
+                "SWARM": "0",
+            },
+            "volumes": ["/var/run/docker.sock:/var/run/docker.sock:ro"],
+            "restart": "unless-stopped",
+        }
     for worker in config.workers:
         services[f"worker-{worker.name}"] = {
             "image": config.worker_image,
@@ -127,20 +172,57 @@ def compose_mapping(config: CountryConfig) -> dict[str, Any]:
                 "BRUNOST_WORKER_QUEUES": ",".join(worker.queues),
                 "BRUNOST_WORKER_RESOURCE_CLASSES": ",".join(worker.resource_classes),
                 "BRUNOST_WORKER_REGION": worker.region or "",
+                "BRUNOST_JUDGE_SANDBOX_IMAGE": "${BRUNOST_JUDGE_SANDBOX_IMAGE}",
+                "BRUNOST_JUDGE_SANDBOX_IMAGES": "${BRUNOST_JUDGE_SANDBOX_IMAGES}",
+                "BRUNOST_JUDGE_SANDBOX_RUNTIME": "${BRUNOST_JUDGE_SANDBOX_RUNTIME}",
+                "BRUNOST_JUDGE_REQUIRE_SECCOMP": "true",
+                "BRUNOST_JUDGE_SANDBOX_SECCOMP": "${BRUNOST_JUDGE_SANDBOX_SECCOMP}",
+                "BRUNOST_JUDGE_SANDBOX_TIMEOUT_SECONDS": "900",
+                "BRUNOST_JUDGE_SANDBOX_MEMORY": "4g",
+                "BRUNOST_JUDGE_SANDBOX_CPUS": "2",
+                "BRUNOST_JUDGE_SANDBOX_PIDS_LIMIT": "256",
+                "BRUNOST_JUDGE_REQUIRE_IMMUTABLE_ARTIFACTS": "true",
+                "DOCKER_HOST": "tcp://docker-socket-proxy:2375",
+                "TMPDIR": "/srv/brunost-judge/workspaces",
             },
             # The generated Compose file lives in .brunost/rendered; resolve
             # credentials back to the operator-owned project nodes directory.
-            "volumes": [f"../../nodes/{worker.name}.json:/etc/brunost/node.json:ro"],
-            "depends_on": ["judge"],
+            "volumes": [
+                f"../../nodes/{worker.name}.json:/etc/brunost/node.json:ro",
+                f"../../workspaces/{worker.name}:/srv/brunost-judge/workspaces:rw",
+                "${BRUNOST_JUDGE_SANDBOX_SECCOMP}:${BRUNOST_JUDGE_SANDBOX_SECCOMP}:ro",
+            ],
+            "depends_on": ["judge", "docker-socket-proxy"],
+            "stop_grace_period": f"{config.worker_termination_grace_seconds}s",
+            "init": True,
+            "stop_signal": "SIGTERM",
+            "healthcheck": {
+                "test": ["CMD-SHELL", "test -s /etc/brunost/node.json && kill -0 1"],
+                "interval": "15s",
+                "timeout": "5s",
+                "retries": 3,
+                "start_period": "20s",
+            },
+            "logging": {"driver": "json-file", "options": {"max-size": "25m", "max-file": "5"}},
             "restart": "unless-stopped",
-            "deploy": {"replicas": worker.replicas, "resources": {"reservations": {"devices": [{"capabilities": ["gpu"]}]}}} if "gpu" in worker.resource_classes else {"replicas": worker.replicas},
+            "deploy": {
+                "replicas": worker.replicas,
+                "update_config": {"parallelism": 1, "order": "start-first", "failure_action": "rollback"},
+                "rollback_config": {"parallelism": 1, "order": "stop-first"},
+                **({"resources": {"reservations": {"devices": [{"capabilities": ["gpu"]}]}}} if "gpu" in worker.resource_classes else {}),
+            },
         }
     volumes: dict[str, Any] = {}
     if config.storage.postgres == "bundled":
         volumes["postgres-data"] = {}
     if config.storage.artifacts == "minio":
         volumes["artifact-data"] = {}
-    return {"name": config.name, "services": services, **({"volumes": volumes} if volumes else {})}
+    return {
+        "name": config.name,
+        "x-brunost": {"schema-version": 1, "cluster": config.name},
+        "services": services,
+        **({"volumes": volumes} if volumes else {}),
+    }
 
 
 def synchronization_checks(config: CountryConfig) -> dict[str, Any]:
@@ -168,6 +250,19 @@ def synchronization_checks(config: CountryConfig) -> dict[str, Any]:
             and dispatcher_environment.get("BRUNOST_JUDGE_REQUIRE_SIGNED_CALLBACKS") == "true",
             "restart_policy": dispatcher.get("restart") == "unless-stopped",
         },
+        "workers": {
+            "configured": bool(config.workers),
+            "drain_grace_seconds": config.worker_termination_grace_seconds,
+            "socket_proxy_present": not config.workers or "docker-socket-proxy" in services,
+            "credentials_mounted_read_only": all(
+                any(str(volume).endswith(":/etc/brunost/node.json:ro") for volume in services[f"worker-{worker.name}"].get("volumes", []))
+                for worker in config.workers
+            ),
+        },
+        "observability": {
+            "judge_healthcheck": bool(judge.get("healthcheck")),
+            "worker_healthchecks": all(bool(services[f"worker-{worker.name}"].get("healthcheck")) for worker in config.workers),
+        },
     }
 
 
@@ -183,6 +278,7 @@ def render_env(config: CountryConfig) -> str:
             "BRUNOST_JUDGE_API_TOKEN=replace-with-a-long-random-token",
             "BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET=replace-with-a-long-random-secret",
             f"BRUNOST_JUDGE_CALLBACK_HOSTS={','.join(config.callback_hosts)}",
+            "BRUNOST_JUDGE_BIND=127.0.0.1",
             "POSTGRES_PASSWORD=replace-with-a-long-random-password",
             "MINIO_ROOT_USER=brunost",
             "MINIO_ROOT_PASSWORD=replace-with-a-long-random-password",
@@ -190,6 +286,11 @@ def render_env(config: CountryConfig) -> str:
             "BRUNOST_ARTIFACT_SECRET_KEY=replace-with-object-storage-secret-key",
             "BRUNOST_ARTIFACT_ENDPOINT=https://s3.example.org",
             "BRUNOST_POSTGRES_URL=postgresql://user:password@db.example:5432/brunost",
+            "BRUNOST_DOCKER_SOCKET_PROXY_IMAGE=tecnativa/docker-socket-proxy@sha256:<64-hex-digest>",
+            "BRUNOST_JUDGE_SANDBOX_IMAGE=ghcr.io/mlgorithm/brunost-sandbox@sha256:<64-hex-digest>",
+            "BRUNOST_JUDGE_SANDBOX_IMAGES={\"python-3.13\":\"ghcr.io/mlgorithm/brunost-sandbox@sha256:<64-hex-digest>\"}",
+            "BRUNOST_JUDGE_SANDBOX_RUNTIME=runsc",
+            "BRUNOST_JUDGE_SANDBOX_SECCOMP=/srv/brunost-judge/security/brunost-seccomp.json",
             "",
         ]
     )
@@ -217,6 +318,7 @@ def helm_values_mapping(config: CountryConfig) -> dict[str, Any]:
             "apiToken": resolve("${BRUNOST_JUDGE_API_TOKEN}"),
             "callbackSigningSecret": resolve("${BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET}"),
             "callbackHosts": list(config.callback_hosts),
+            "podDisruptionBudget": {"enabled": config.judge_replicas > 1, "minAvailable": 1},
         },
         "workers": [
             {
@@ -225,6 +327,17 @@ def helm_values_mapping(config: CountryConfig) -> dict[str, Any]:
                 "replicas": worker.replicas,
                 "queues": list(worker.queues),
                 "resourceClasses": list(worker.resource_classes),
+                "region": worker.region or "",
+                "autoscaling": {
+                    "enabled": worker.autoscaling,
+                    "minReplicas": worker.min_replicas,
+                    "maxReplicas": worker.max_replicas,
+                    "targetCPUUtilization": worker.target_cpu_utilization,
+                },
+                "resources": {
+                    "requests": {"cpu": "100m", "memory": "256Mi"},
+                    "limits": {"cpu": "2", "memory": "4Gi"},
+                },
             }
             for worker in config.workers
         ],
@@ -232,6 +345,7 @@ def helm_values_mapping(config: CountryConfig) -> dict[str, Any]:
         "postgres": {
             "externalUrl": resolve(config.storage.postgres_url or ""),
             "image": config.storage.postgres_image,
+            "password": resolve("${POSTGRES_PASSWORD}"),
         },
         "artifacts": {
             "endpoint": resolve(config.storage.artifacts_endpoint or ""),
@@ -246,5 +360,19 @@ def helm_values_mapping(config: CountryConfig) -> dict[str, Any]:
             "host": urlparse(config.public_url).hostname or "judge.example.org",
             "tlsSecret": "brunost-tls",
         },
-        "monitoring": {"enabled": config.monitoring},
+        "monitoring": {"enabled": config.monitoring, "path": "/metrics", "port": 8787},
+        "workerDefaults": {
+            "terminationGraceSeconds": config.worker_termination_grace_seconds,
+            "socketProxyImage": resolve("${BRUNOST_DOCKER_SOCKET_PROXY_IMAGE}"),
+            "dockerSocketPath": "/var/run/docker.sock",
+            "workspacePath": "/srv/brunost-judge/workspaces",
+            "sandbox": {
+                "image": resolve("${BRUNOST_JUDGE_SANDBOX_IMAGE}"),
+                "images": resolve("${BRUNOST_JUDGE_SANDBOX_IMAGES}"),
+                "runtime": resolve("${BRUNOST_JUDGE_SANDBOX_RUNTIME}"),
+                "requireSeccomp": "true",
+                "seccompProfilePath": resolve("${BRUNOST_JUDGE_SANDBOX_SECCOMP}"),
+            },
+            "podDisruptionBudget": {"enabled": bool(config.workers), "maxUnavailable": 0},
+        },
     }

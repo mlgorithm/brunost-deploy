@@ -8,6 +8,9 @@ judge:
   apiToken: replace-me
   callbackSigningSecret: replace-me
   callbackHosts: [premium.example.org]
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
 
 workers:
   - name: cpu
@@ -15,11 +18,27 @@ workers:
     replicas: 1
     queues: [default]
     resourceClasses: [cpu]
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 10
+      targetCPUUtilization: 70
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {cpu: "2", memory: 4Gi}
   - name: gpu
     image: ghcr.io/mlgorithm/brunost-judge@sha256:<64-hex-digest>
     replicas: 1
     queues: [gpu, default]
     resourceClasses: [gpu, cpu]
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 10
+      targetCPUUtilization: 70
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {cpu: "2", memory: 4Gi}
 
 # Filled by `brunostctl node join` and passed to Helm with --set-file. Never
 # commit worker tokens to a values file.
@@ -28,6 +47,7 @@ nodeConfigs: {}
 postgres:
   externalUrl: ""
   image: postgres@sha256:<64-hex-digest>
+  password: replace-me
   storage: 50Gi
 
 artifacts:
@@ -45,3 +65,20 @@ ingress:
 
 monitoring:
   enabled: true
+  path: /metrics
+  port: 8787
+
+workerDefaults:
+  terminationGraceSeconds: 900
+  socketProxyImage: tecnativa/docker-socket-proxy@sha256:<64-hex-digest>
+  dockerSocketPath: /var/run/docker.sock
+  workspacePath: /srv/brunost-judge/workspaces
+  sandbox:
+    image: ghcr.io/mlgorithm/brunost-sandbox@sha256:<64-hex-digest>
+    images: '{"python-3.13":"ghcr.io/mlgorithm/brunost-sandbox@sha256:<64-hex-digest>"}'
+    runtime: runsc
+    requireSeccomp: "true"
+    seccompProfilePath: /srv/brunost-judge/security/brunost-seccomp.json
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 0

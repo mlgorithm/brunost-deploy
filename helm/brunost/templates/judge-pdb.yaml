@@ -1,0 +1,15 @@
+{{- if and .Values.judge.podDisruptionBudget.enabled (gt (int .Values.judge.replicas) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "brunost.fullname" . }}-judge
+  labels:
+    {{- include "brunost.labels" . | nindent 4 }}
+    app.kubernetes.io/component: judge
+spec:
+  minAvailable: {{ .Values.judge.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: judge
+      {{- include "brunost.labels" . | nindent 6 }}
+{{- end }}

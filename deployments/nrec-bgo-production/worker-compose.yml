@@ -1,3 +1,5 @@
+name: brunost-judge-worker
+
 services:
   docker-socket-proxy:
     image: ${BRUNOST_DOCKER_SOCKET_PROXY_IMAGE:?set BRUNOST_DOCKER_SOCKET_PROXY_IMAGE to a digest-pinned image}
@@ -15,6 +17,11 @@ services:
       SWARM: "0"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /var/run/docker.sock"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
 
   judge-worker:
@@ -41,6 +48,20 @@ services:
       - /srv/brunost-judge/node.json:/etc/brunost/node.json:ro
       - /srv/brunost-judge/workspaces:/srv/brunost-judge/workspaces:rw
       - /srv/brunost-judge/security/brunost-seccomp.json:/srv/brunost-judge/security/brunost-seccomp.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /etc/brunost/node.json && kill -0 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    stop_grace_period: 15m
+    init: true
+    stop_signal: SIGTERM
+    logging:
+      driver: json-file
+      options:
+        max-size: 25m
+        max-file: "5"
     read_only: true
     tmpfs:
       - /tmp

@@ -1,10 +1,11 @@
+import json
 from pathlib import Path
 
 import pytest
 import yaml
 
-from brunostctl.cli import main
-from brunostctl.config import ConfigError, CountryConfig
+from brunostctl.cli import _snapshot_rendered, main
+from brunostctl.config import ConfigError, CountryConfig, required_environment, validate_environment
 from brunostctl.presets import preset_mapping
 from brunostctl.render import compose_mapping, helm_values_mapping, synchronization_checks
 
@@ -47,6 +48,9 @@ def test_compose_contains_control_plane_workers_and_shared_postgres():
     assert rendered["services"]["judge"]["environment"]["BRUNOST_JUDGE_CALLBACK_HOSTS"] == "premium"
     assert "BRUNOST_JUDGE_API_TOKEN" not in rendered["services"]["worker-gpu-1"]["environment"]
     assert "BRUNOST_JUDGE_DATABASE_URL" not in rendered["services"]["worker-gpu-1"]["environment"]
+    assert "docker-socket-proxy" in rendered["services"]
+    assert rendered["services"]["judge"]["healthcheck"]["retries"] == 12
+    assert rendered["services"]["worker-gpu-1"]["stop_grace_period"] == "900s"
 
 
 def test_synchronization_checks_cover_durable_signed_callback_delivery():
@@ -54,6 +58,68 @@ def test_synchronization_checks_cover_durable_signed_callback_delivery():
     checks = synchronization_checks(config)
     assert checks["callback_hosts"] == ["premium"]
     assert all(checks["callback_dispatcher"].values())
+    assert checks["workers"]["socket_proxy_present"] is True
+    assert checks["observability"]["worker_healthchecks"] is True
+
+
+def test_strict_environment_rejects_examples_without_leaking_values():
+    config = CountryConfig.from_mapping(preset_mapping("small", cluster_name="test", public_url="https://test.example"))
+    errors = validate_environment(config, {name: "replace-me" for name in required_environment(config)}, strict=True)
+    assert any(error.startswith("BRUNOST_JUDGE_API_TOKEN is required") for error in errors)
+    assert all("replace-me" not in error for error in errors)
+
+
+def test_worker_autoscaling_round_trips_to_helm_values():
+    mapping = _production_mapping()
+    mapping["backend"] = "k3s"
+    mapping["storage"] = {"postgres": "external", "postgres_url": "postgresql://user:pass@db/brunost", "artifacts": "external", "artifacts_endpoint": "https://objects.test"}
+    mapping["workers"][0]["replicas"] = 2
+    mapping["workers"][0]["autoscaling"] = {"enabled": True, "min_replicas": 2, "max_replicas": 8, "target_cpu_utilization": 65}
+    config = CountryConfig.from_mapping(mapping)
+    values = helm_values_mapping(config)
+    worker = values["workers"][0]
+    assert worker["autoscaling"] == {"enabled": True, "minReplicas": 2, "maxReplicas": 8, "targetCPUUtilization": 65}
+    assert worker["resources"]["requests"]["cpu"] == "100m"
+
+
+def test_helm_workers_are_wired_to_the_sandbox_proxy_and_shared_paths():
+    mapping = _production_mapping()
+    mapping["backend"] = "k3s"
+    mapping["storage"] = {"postgres": "external", "postgres_url": "postgresql://user:pass@db/brunost", "artifacts": "external", "artifacts_endpoint": "https://objects.test"}
+    config = CountryConfig.from_mapping(mapping)
+    values = helm_values_mapping(config)
+    assert values["judge"]["podDisruptionBudget"] == {"enabled": False, "minAvailable": 1}
+    assert values["workerDefaults"]["sandbox"]["runtime"]
+    assert values["workerDefaults"]["workspacePath"] == "/srv/brunost-judge/workspaces"
+    template = (Path(__file__).parents[1] / "helm" / "brunost" / "templates" / "worker-deployment.yaml").read_text()
+    assert "DOCKER_HOST" in template
+    assert "docker-socket-proxy" in template
+    assert "type: Socket" in template
+    assert "type: File" in template
+
+
+def test_render_manifest_and_release_snapshot_are_deterministic(tmp_path: Path):
+    assert main(["init", str(tmp_path), "--preset", "single", "--name", "demo", "--public-url", "https://demo.test"]) == 0
+    manifest = tmp_path / ".brunost" / "rendered" / "release-manifest.json"
+    first = manifest.read_text(encoding="utf-8")
+    assert "config_sha256" in first
+    snapshot = _snapshot_rendered(tmp_path, "before-upgrade")
+    assert snapshot is not None
+    assert (snapshot / "docker-compose.yml").read_text(encoding="utf-8") == (tmp_path / ".brunost" / "rendered" / "docker-compose.yml").read_text(encoding="utf-8")
+    assert (snapshot / "release-manifest.json").read_text(encoding="utf-8") == first
+
+
+def test_node_drain_can_request_async_drain(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
+    requests: list[tuple[str, str, dict | None]] = []
+
+    def fake_request(url: str, *, method: str = "GET", token: str | None = None, payload: dict | None = None) -> dict:
+        requests.append((url, method, payload))
+        return {"status": "draining"}
+
+    monkeypatch.setattr("brunostctl.cli._json_request", fake_request)
+    assert main(["node", "drain", "--url", "https://judge.test", "--token", "token", "--worker-id", "cpu-1", "--no-wait"]) == 0
+    assert requests == [("https://judge.test/v1/workers/cpu-1/drain", "POST", {"timeout_seconds": 900})]
+    assert yaml.safe_load(capsys.readouterr().out)["status"] == "draining"
 
 
 def test_standalone_and_packaged_helm_charts_stay_in_sync():
@@ -98,14 +164,27 @@ def test_k3s_install_uses_bundled_chart_and_node_files(tmp_path: Path, capsys: p
     (tmp_path / "brunost.yaml").write_text(yaml.safe_dump(mapping, sort_keys=False), encoding="utf-8")
     (tmp_path / "nodes").mkdir()
     for name in ("cpu-1", "gpu-1"):
-        (tmp_path / "nodes" / f"{name}.json").write_text("{}\n", encoding="utf-8")
+        node_file = tmp_path / "nodes" / f"{name}.json"
+        node_file.write_text(
+            json.dumps(
+                {"api_url": "https://judge.test", "worker_id": name, "worker_token": "test-token"},
+            ),
+            encoding="utf-8",
+        )
+        node_file.chmod(0o600)
     (tmp_path / ".env").write_text(
         "BRUNOST_JUDGE_API_TOKEN=judge\nBRUNOST_JUDGE_CALLBACK_SIGNING_SECRET=callback\n"
         "BRUNOST_ARTIFACT_ACCESS_KEY=access\nBRUNOST_ARTIFACT_SECRET_KEY=secret\n"
         "BRUNOST_POSTGRES_URL=postgresql://user:pass@db/brunost\n"
-        "BRUNOST_ARTIFACT_ENDPOINT=https://objects.test\n",
+        "BRUNOST_ARTIFACT_ENDPOINT=https://objects.test\n"
+        f"BRUNOST_DOCKER_SOCKET_PROXY_IMAGE=proxy@sha256:{'c' * 64}\n"
+        f"BRUNOST_JUDGE_SANDBOX_IMAGE=sandbox@sha256:{'d' * 64}\n"
+        f"BRUNOST_JUDGE_SANDBOX_IMAGES={{\"python-3.13\":\"sandbox@sha256:{'d' * 64}\"}}\n"
+        "BRUNOST_JUDGE_SANDBOX_RUNTIME=runsc\n"
+        "BRUNOST_JUDGE_SANDBOX_SECCOMP=/srv/brunost-judge/security/brunost-seccomp.json\n",
         encoding="utf-8",
     )
+    (tmp_path / ".env").chmod(0o600)
     assert main(["install", "--config", str(tmp_path / "brunost.yaml"), "--dry-run"]) == 0
     assert ".brunost/chart" in capsys.readouterr().out
 

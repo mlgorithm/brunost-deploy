@@ -23,6 +23,8 @@ deploy the Premium API or any Premium database.
 Copy `compose.yml` to the control-plane node and `worker-compose.yml` to every
 worker node. Create mode-0600 environment/configuration files and run
 `docker compose --env-file .env -f compose.yml config -q` before starting.
+The Compose files use a 15-minute worker stop grace period; run the drain API
+command before stopping a worker so leased work can finish.
 
 For a distributed installation, set these control-plane values (replace the
 private address with the node address in your topology):
@@ -37,6 +39,31 @@ reach TCP 8787. Every worker must have
 plane. Premium must use the same value as
 `BRUNOST_JUDGE_CALLBACK_SECRET` and configure
 `BRUNOST_JUDGE_CALLBACK_URL=https://premium.example.org/api/judge/callback`.
+
+## Backup and recovery commands
+
+Run the daily unit after installing the executable scripts under
+`/usr/local/sbin`:
+
+```bash
+install -m 0755 backup-judge.sh /usr/local/sbin/brunost-judge-backup
+install -m 0755 restore-judge.sh /usr/local/sbin/brunost-judge-restore
+install -m 0755 disaster-recovery-check.sh /usr/local/sbin/brunost-judge-dr-check
+systemctl enable --now brunost-judge-backup.timer
+/usr/local/sbin/brunost-judge-dr-check /srv/brunost/backups/judge/latest
+```
+
+The backup contains a custom-format PostgreSQL dump, mirrored Judge artifact
+objects, a manifest, and checksums. Restore only into the intended target and
+only with an explicit confirmation:
+
+```bash
+BRUNOST_RESTORE_CONFIRM=YES \
+  /usr/local/sbin/brunost-judge-restore /srv/brunost/backups/judge/2026-08-30T033500Z
+```
+
+Use the isolated recovery procedure in [DR.md](DR.md) for a periodic drill.
+The scripts do not promote asynchronous PostgreSQL replicas or change DNS.
 
 ## Premium cutover
 

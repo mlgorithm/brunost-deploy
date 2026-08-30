@@ -1,6 +1,6 @@
 [project]
 name = "brunost-deploy"
-version = "0.1.0"
+version = "0.2.0"
 description = "No-code deployment and lifecycle tooling for Brunost Judge"
 requires-python = ">=3.11"
 dependencies = ["PyYAML>=6.0,<7"]

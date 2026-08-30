@@ -54,20 +54,39 @@ brunostctl status --url https://judge.example.org --token "$BRUNOST_JUDGE_API_TO
 brunostctl verify --config brunost.yaml \
   --url https://judge.example.org --token "$BRUNOST_JUDGE_API_TOKEN" \
   --premium-url https://premium.example.org
-brunostctl backup --dry-run
-brunostctl upgrade --release 2026.08.1 --dry-run
-brunostctl rollback --release 4 --dry-run
+brunostctl backup --config brunost.yaml --output backups/judge.dump --dry-run
+brunostctl upgrade --config brunost.yaml --release 2026.08.1 --dry-run
+brunostctl rollback --config brunost.yaml --release pre-2026.08.1 --dry-run
+brunostctl restore --config brunost.yaml --backup backups/judge.dump --dry-run
+brunostctl node drain --worker-id cpu-1 --wait
 ```
 
-`install` refuses to start when an image is not digest-pinned or a configured
-worker has not been enrolled. Compose is intended for one Judge control-plane
-host; the HA preset uses Helm/K3s. PostgreSQL and artifact storage must be
-shared by every Judge control-plane and worker process. For production, use
-replicated or managed PostgreSQL and an S3-compatible artifact store.
+`preflight --strict` and `install` validate image digests, secret/configuration
+values, private-file permissions, worker credential files, and the local
+Compose/Helm toolchain. `install` runs `docker compose config -q` or
+`helm lint`/`helm template` before changing runtime state. It then uses Compose
+health waits or Helm `--atomic --wait`; upgrades retain a deterministic
+pre-upgrade snapshot under `.brunost/releases/` for rollback. Compose is
+intended for one Judge control-plane host; the HA preset uses Helm/K3s.
+PostgreSQL and artifact storage must be shared by every Judge control-plane and
+worker process. For production, use replicated or managed PostgreSQL and an
+S3-compatible artifact store.
+
+K3s workers must be scheduled on nodes with a Docker-compatible runtime, the
+configured sandbox runtime, and the seccomp profile at the configured host
+path. Each worker pod uses a restricted Docker socket-proxy sidecar and a
+shared host workspace so evaluator containers can safely access the paths that
+the worker creates.
 
 The Helm chart is bundled inside the `brunostctl` package. `init` materializes
 it under `.brunost/chart`, so a country operator can run the K3s installation
 from the generated directory without cloning this repository or writing YAML.
+
+Workers receive a long termination grace period and a rolling-update/PDB
+policy so an operator can drain a worker before maintenance. Helm worker
+autoscaling is opt-in per worker and uses CPU requests as a safe baseline;
+queue-depth autoscaling still requires a metrics adapter and a Judge metric
+contract in the target cluster.
 
 ## Ownership
 
@@ -95,11 +114,12 @@ or change either service.
 
 ## Task packages
 
-Task authors still publish immutable task bundles. Standard IOI/ICPC/IOAI
-templates can be layered on later, but deployment does not assume a task
-implementation language. Register a task with the Judge SDK or CLI, then add
-its stable `task_ref` to a Premium task. Premium sends immutable artifacts to
-Judge and receives signed, idempotent callbacks.
+Task authors publish immutable task bundles. Deterministic code, ML
+train/predict, quiz, and optimization workflows are evaluated by the Judge
+contract; deployment does not assume a task implementation language. Register
+a task with the Judge SDK or CLI, then add its stable `task_ref` to a Premium
+task. Premium sends immutable artifacts to Judge and receives signed,
+idempotent callbacks.
 
 ## Premium integration
 
@@ -128,3 +148,6 @@ communicate only through the versioned HTTP/API and signed callback contracts.
   the HA shape.
 - Test `backup`, restore, worker loss, callback retry, and rollback before an
   official contest.
+- The NREC profile's `backup-judge.sh` backs up PostgreSQL and object artifacts;
+  `restore-judge.sh` verifies checksums before a confirmed restore, and
+  `disaster-recovery-check.sh` performs a non-destructive dump/manifest check.

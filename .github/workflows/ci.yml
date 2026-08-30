@@ -24,3 +24,5 @@ jobs:
       - run: pytest -q
       - uses: azure/setup-helm@v4
       - run: helm lint helm/brunost
+      - run: helm template ci helm/brunost --namespace brunost-ci >/tmp/brunost-helm.yaml
+      - run: bash -n deployments/nrec-bgo-production/*.sh

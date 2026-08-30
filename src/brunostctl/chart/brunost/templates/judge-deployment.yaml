@@ -7,6 +7,12 @@ metadata:
     app.kubernetes.io/component: judge
 spec:
   replicas: {{ .Values.judge.replicas }}
+  revisionHistoryLimit: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app.kubernetes.io/component: judge
@@ -16,6 +22,10 @@ spec:
       labels:
         app.kubernetes.io/component: judge
         {{- include "brunost.labels" . | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: {{ .Values.monitoring.enabled | quote }}
+        prometheus.io/path: {{ .Values.monitoring.path | quote }}
+        prometheus.io/port: {{ .Values.monitoring.port | quote }}
     spec:
       containers:
         - name: judge
@@ -77,9 +87,21 @@ spec:
               value: {{ join "," .Values.judge.callbackHosts | quote }}
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /readyz
               port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
           livenessProbe:
             httpGet:
               path: /healthz
               port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30

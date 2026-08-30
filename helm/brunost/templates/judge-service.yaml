@@ -4,6 +4,10 @@ metadata:
   name: {{ include "brunost.fullname" . }}-judge
   labels:
     {{- include "brunost.labels" . | nindent 4 }}
+  annotations:
+    prometheus.io/scrape: {{ .Values.monitoring.enabled | quote }}
+    prometheus.io/path: {{ .Values.monitoring.path | quote }}
+    prometheus.io/port: {{ .Values.monitoring.port | quote }}
 spec:
   selector:
     app.kubernetes.io/component: judge

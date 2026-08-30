@@ -13,6 +13,14 @@ if [[ ! -f "$env_file" || -z "$backup_root" || "$backup_root" == "/" ]]; then
   echo "invalid backup configuration" >&2
   exit 2
 fi
+if [[ ! "$mc_image" =~ @sha256:[0-9a-fA-F]{64}$ ]]; then
+  echo "BRUNOST_JUDGE_MC_IMAGE must be pinned by a sha256 digest" >&2
+  exit 2
+fi
+if ! [[ "$retention_days" =~ ^[0-9]+$ ]] || (( retention_days < 1 )); then
+  echo "BRUNOST_JUDGE_BACKUP_RETENTION_DAYS must be a positive integer" >&2
+  exit 2
+fi
 
 set -a
 # shellcheck disable=SC1090

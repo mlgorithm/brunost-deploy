@@ -1,5 +1,7 @@
 .env
 .brunost/
+backups/
+*.dump
 nodes/*.json
 *.secret
 __pycache__/

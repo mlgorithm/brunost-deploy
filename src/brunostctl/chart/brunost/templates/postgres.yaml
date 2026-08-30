@@ -5,7 +5,7 @@ metadata:
   name: {{ include "brunost.fullname" . }}-postgres
 type: Opaque
 stringData:
-  password: replace-me
+  password: {{ .Values.postgres.password | quote }}
 ---
 apiVersion: v1
 kind: Service
