@@ -319,6 +319,44 @@ def _database_environment_problems(config: CountryConfig, values: dict[str, str]
     return []
 
 
+def _write_backup_metadata(output: Path, config: CountryConfig) -> None:
+    digest = hashlib.sha256(output.read_bytes()).hexdigest()
+    checksum = output.with_name(f"{output.name}.sha256")
+    manifest = output.with_name(f"{output.name}.manifest.json")
+    checksum.write_text(f"{digest}  {output.name}\n", encoding="utf-8")
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "cluster": config.name,
+                "backend": config.backend,
+                "database": "brunost",
+                "dump": output.name,
+                "sha256": digest,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    for path in (checksum, manifest):
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+
+
+def _verify_backup_checksum(backup: Path) -> bool:
+    checksum = backup.with_name(f"{backup.name}.sha256")
+    if not checksum.is_file():
+        return True
+    fields = checksum.read_text(encoding="utf-8").strip().split()
+    if len(fields) != 2 or fields[1] != backup.name or not re.fullmatch(r"[0-9a-fA-F]{64}", fields[0]):
+        return False
+    return hashlib.sha256(backup.read_bytes()).hexdigest().lower() == fields[0].lower()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="brunostctl", description="Install and operate a distributed Brunost country cluster")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -506,11 +544,16 @@ def main(argv: list[str] | None = None) -> int:
                 if database_errors:
                     raise ConfigError("backup preflight failed: " + "; ".join(database_errors))
                 if config.storage.postgres == "external":
+                    if not args.dry_run and not _command_available("pg_dump"):
+                        raise ConfigError("pg_dump is required for an external PostgreSQL backup")
                     postgres_url = os.environ.get("BRUNOST_POSTGRES_URL") or config.storage.postgres_url
                     if not postgres_url or postgres_url.startswith("${"):
                         raise ConfigError("set BRUNOST_POSTGRES_URL before backing up external PostgreSQL")
                     command = ["pg_dump", postgres_url, "--format=custom"]
-                    return _run_to_file(command, cwd=root, output=output, dry_run=args.dry_run)
+                    result = _run_to_file(command, cwd=root, output=output, dry_run=args.dry_run)
+                    if result == 0 and not args.dry_run:
+                        _write_backup_metadata(output, config)
+                    return result
                 else:
                     command = [
                         "docker",
@@ -528,7 +571,10 @@ def main(argv: list[str] | None = None) -> int:
                         "--format=custom",
                         "brunost",
                     ]
-                    return _run_to_file(command, cwd=root, output=output, dry_run=args.dry_run)
+                    result = _run_to_file(command, cwd=root, output=output, dry_run=args.dry_run)
+                    if result == 0 and not args.dry_run:
+                        _write_backup_metadata(output, config)
+                    return result
             elif args.command == "upgrade":
                 _preflight(config, strict=True, root=args.config.parent, enforce_tools=not args.dry_run)
                 _snapshot_rendered(args.config.parent, f"pre-{args.release}", config_path=args.config)
@@ -616,6 +662,8 @@ def main(argv: list[str] | None = None) -> int:
             backup = args.backup.expanduser().resolve()
             if not backup.is_file():
                 raise ConfigError(f"backup does not exist: {backup}")
+            if not _verify_backup_checksum(backup):
+                raise ConfigError(f"backup checksum verification failed: {backup}")
             config = _load_config(args.config, strict=True)
             environment_errors = _database_environment_problems(config, dict(os.environ))
             if environment_errors:
@@ -623,6 +671,8 @@ def main(argv: list[str] | None = None) -> int:
             if not args.confirm and not args.dry_run:
                 raise ConfigError("restore replaces Judge data; repeat with --confirm")
             if config.storage.postgres == "external":
+                if not args.dry_run and not _command_available("pg_restore"):
+                    raise ConfigError("pg_restore is required for an external PostgreSQL restore")
                 postgres_url = os.environ.get("BRUNOST_POSTGRES_URL") or config.storage.postgres_url
                 if not postgres_url or postgres_url.startswith("${"):
                     raise ConfigError("set BRUNOST_POSTGRES_URL before restoring external PostgreSQL")
@@ -655,6 +705,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise ConfigError(f"backup does not exist: {backup}")
             checks = {
                 "backup_file": True,
+                "checksum_verified": _verify_backup_checksum(backup),
                 "custom_format_dump": _command_available("pg_restore"),
                 "restore_command": "brunostctl restore --config " + str(args.config) + " --backup " + str(backup) + " --confirm",
                 "runbook": "deployments/nrec-bgo-production/DR.md",

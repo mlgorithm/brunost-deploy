@@ -179,6 +179,8 @@ class CountryConfig:
         errors: list[str] = []
         if not self.name.strip():
             errors.append("cluster.name cannot be empty")
+        elif len(self.name) > 63 or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", self.name):
+            errors.append("cluster.name must be a lowercase DNS-safe name")
         parsed = urlparse(self.public_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             errors.append("cluster.public_url must be an absolute http(s) URL")
@@ -202,7 +204,7 @@ class CountryConfig:
         for worker in self.workers:
             if worker.replicas < 1:
                 errors.append(f"worker {worker.name} replicas must be positive")
-            if not worker.resource_classes or not worker.queues:
+            if not worker.resource_classes or not worker.queues or any(not value.strip() for value in worker.resource_classes + worker.queues):
                 errors.append(f"worker {worker.name} needs resource_classes and queues")
             if worker.min_replicas < 1 or worker.max_replicas < 1 or worker.min_replicas > worker.max_replicas:
                 errors.append(f"worker {worker.name} autoscaling replica bounds are invalid")
@@ -365,6 +367,12 @@ def validate_environment(config: CountryConfig, values: dict[str, str], *, stric
         if is_placeholder(value):
             errors.append(f"{name} is required ({description})")
     if config.workers:
+        runtime = values.get("BRUNOST_JUDGE_SANDBOX_RUNTIME", "")
+        if runtime and runtime not in {"runsc", "kata-runtime"}:
+            errors.append("BRUNOST_JUDGE_SANDBOX_RUNTIME must be runsc or kata-runtime")
+        seccomp_path = values.get("BRUNOST_JUDGE_SANDBOX_SECCOMP", "")
+        if seccomp_path and not seccomp_path.startswith("/"):
+            errors.append("BRUNOST_JUDGE_SANDBOX_SECCOMP must be an absolute path")
         for name in ("BRUNOST_DOCKER_SOCKET_PROXY_IMAGE", "BRUNOST_JUDGE_SANDBOX_IMAGE"):
             if values.get(name) and not is_digest_pinned_image(values[name]):
                 errors.append(f"{name} must be pinned by a 64-character sha256 digest")
@@ -376,6 +384,8 @@ def validate_environment(config: CountryConfig, values: dict[str, str], *, stric
             errors.append("BRUNOST_JUDGE_SANDBOX_IMAGES must be valid JSON when configured as a mapping")
         if isinstance(parsed_sandbox_images, dict):
             sandbox_images = [str(item).strip() for item in parsed_sandbox_images.values() if str(item).strip()]
+            if not sandbox_images:
+                errors.append("BRUNOST_JUDGE_SANDBOX_IMAGES must contain at least one image")
         else:
             sandbox_images = [item.strip() for item in raw_sandbox_images.split(",") if item.strip()]
         if sandbox_images and any(not is_digest_pinned_image(item) for item in sandbox_images):

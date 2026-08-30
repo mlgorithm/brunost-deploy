@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from brunostctl.cli import _snapshot_rendered, main
+from brunostctl.cli import _snapshot_rendered, _verify_backup_checksum, _write_backup_metadata, main
 from brunostctl.config import ConfigError, CountryConfig, required_environment, validate_environment
 from brunostctl.presets import preset_mapping
 from brunostctl.render import compose_mapping, helm_values_mapping, synchronization_checks
@@ -120,6 +120,16 @@ def test_node_drain_can_request_async_drain(monkeypatch: pytest.MonkeyPatch, cap
     assert main(["node", "drain", "--url", "https://judge.test", "--token", "token", "--worker-id", "cpu-1", "--no-wait"]) == 0
     assert requests == [("https://judge.test/v1/workers/cpu-1/drain", "POST", {"timeout_seconds": 900})]
     assert yaml.safe_load(capsys.readouterr().out)["status"] == "draining"
+
+
+def test_cli_backup_metadata_is_checksum_verifiable(tmp_path: Path):
+    config = CountryConfig.from_mapping(_production_mapping())
+    dump = tmp_path / "postgres.dump"
+    dump.write_bytes(b"custom-format-test-dump")
+    _write_backup_metadata(dump, config)
+    assert _verify_backup_checksum(dump) is True
+    dump.write_bytes(b"tampered")
+    assert _verify_backup_checksum(dump) is False
 
 
 def test_standalone_and_packaged_helm_charts_stay_in_sync():
