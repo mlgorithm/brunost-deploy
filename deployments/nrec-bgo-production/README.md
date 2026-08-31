@@ -85,6 +85,11 @@ it does not create submissions or replay callbacks. After that check, perform
 the separate controlled smoke test for one immutable artifact, one
 submission, and one signed callback before enabling contest traffic.
 
+The version-controlled public edge baseline is `premium-edge.conf`. Before
+installing it, preserve the active config under `/srv/brunost/nginx-backups/`
+(never in `sites-enabled`), confirm every upstream address against the live
+OpenStack inventory, run `nginx -t`, and reload only after the test passes.
+
 ## Current NREC layout
 
 The production deployment currently runs the following roles:
@@ -92,10 +97,10 @@ The production deployment currently runs the following roles:
 | Node | Role |
 | --- | --- |
 | `brunost-app-01` | Public Nginx edge, Premium API/worker, Platform Core, monitoring |
-| `brunost-app-02` | Private Premium API/worker and Platform Core replica |
+| `brunost-app-02` (`158.39.201.29`) | Private Premium API/worker and Platform Core replica |
 | `brunost-data-01` | PostgreSQL primary, Redis, and MinIO |
-| `brunost-data-02` | PostgreSQL asynchronous streaming replica |
-| `brunost-data-03` | PostgreSQL asynchronous streaming replica |
+| `brunost-data-02` (`158.39.201.74`) | PostgreSQL asynchronous streaming replica |
+| `brunost-data-03` (`158.39.201.226`) | PostgreSQL asynchronous streaming replica |
 | `brunost-compute-01` | Judge control plane |
 | `brunost-worker-cpu-01`, `brunost-worker-cpu-02` | Distributed Judge workers |
 | `brunost-notebook-01` | Notebook/lab workloads |
@@ -117,3 +122,28 @@ Before removing rollback artifacts, verify the public Premium submission and
 signed Judge callback flow, both app-node health checks, and two streaming
 replicas. Keep the PostgreSQL base-backup procedure and the dated app/Nginx
 backups available for recovery.
+
+## Premium `ab03bc7` release evidence
+
+The authoritative deterministic release task is:
+
+```text
+release-testing/premium-ab03bc7-deterministic-sum-v2
+```
+
+- Standalone Judge execution `c2f5c17a-12d2-41b0-a56e-365df0bb5a14`
+  completed with score `1.0`.
+- Premium submission `444910be-0f5d-4b99-b616-f88c43faa955` produced Judge
+  execution `e89c01ce-b8bc-499c-b321-4960e58e3b02`, completed with score `1.0`,
+  and applied its signed callback to contest progress.
+
+`release-testing/premium-ab03bc7-deterministic-sum-v1` is **invalid release
+evidence**. Its uploaded archive contained macOS AppleDouble entries, so execution
+`711c6851-2429-408a-b4db-fd627d62410b` scored `0.0`. Judge task references and
+executions are intentionally immutable and have no deletion API; retain this
+record as audit evidence rather than modifying the Judge database. Release gates
+must allowlist the exact `-v2` reference above and reject the `-v1` reference.
+
+Build future Judge archives on Linux or disable macOS copyfile metadata, and list
+the archive before upload. A release archive containing `._*` entries must fail
+preflight rather than be registered under a task reference.
