@@ -32,6 +32,10 @@ spec:
         prometheus.io/path: {{ $.Values.monitoring.path | quote }}
         prometheus.io/port: {{ $.Values.monitoring.port | quote }}
     spec:
+      {{- with .nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       terminationGracePeriodSeconds: {{ $.Values.workerDefaults.terminationGraceSeconds }}
       containers:
         - name: worker

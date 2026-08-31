@@ -10,7 +10,10 @@ Premium or owns Premium data.
 ## Install
 
 ```bash
-python -m pip install -e '.[dev]'
+# Published package:
+python -m pip install 'brunost-deploy>=0.3,<0.4'
+# Repository development:
+# python -m pip install -e '.[dev]'
 brunostctl init country-2026 --preset small --name country-2026 \
   --public-url https://contest.example.org
 cd country-2026
@@ -30,20 +33,25 @@ Presets:
 
 Run this once per physical worker node. The join token is single-use and
 short-lived; the resulting JSON contains a scoped worker credential and must be
-stored as a private file.
+stored as a private file. Issue tokens from the declared topology: the command
+copies the worker's queue, resource class, region, and allowed runtime
+capabilities into the one-time grant. This prevents a worker from advertising a
+runtime that the control plane did not authorize.
 
 ```bash
-brunostctl node issue --url https://judge.example.org \
-  --token "$BRUNOST_JUDGE_API_TOKEN" --node-id cpu-1 \
-  --queue default --resource-class cpu
+brunostctl node issue --topology brunost.yaml --worker cpu-1 \
+  --node-id cpu-1
 
 brunostctl node join --url https://judge.example.org \
   --join-token "$JOIN_TOKEN" --output nodes/cpu-1.json
 brunostctl node doctor --config nodes/cpu-1.json
 ```
 
-For a worker with a GPU, add `--queue gpu --resource-class gpu --capability
-cuda`. No application code or database edits are needed.
+The `ha-5-node` preset demonstrates CPU and GPU workers. For K3s, label the
+host nodes to match each `workers[].node_selector` before installation (for
+example, `kubectl label node gpu-host brunost.io/worker=gpu-1`). The declared
+GPU worker receives the `gpu:true` capability automatically. No application
+code or database edits are needed.
 
 ## Install and operate
 
@@ -66,7 +74,12 @@ values, private-file permissions, worker credential files, and the local
 Compose/Helm toolchain. `install` runs `docker compose config -q` or
 `helm lint`/`helm template` before changing runtime state. It then uses Compose
 health waits or Helm `--atomic --wait`; upgrades retain a deterministic
-pre-upgrade snapshot under `.brunost/releases/` for rollback. Compose is
+pre-upgrade snapshot under `.brunost/releases/` for rollback. After each
+successful Compose deployment, Brunost records non-secret runtime pins; the
+next snapshot copies them into `runtime.env`, so rollback does not accidentally
+use later sandbox or proxy images.
+The release identifier is an audit label: update the topology's digest-pinned
+images before invoking `upgrade`. Compose is
 intended for one Judge control-plane host; the HA preset uses Helm/K3s.
 PostgreSQL and artifact storage must be shared by every Judge control-plane and
 worker process. For production, use replicated or managed PostgreSQL and an
@@ -74,7 +87,9 @@ S3-compatible artifact store.
 
 K3s workers must be scheduled on nodes with a Docker-compatible runtime, the
 configured sandbox runtime, and the seccomp profile at the configured host
-path. Each worker pod uses a restricted Docker socket-proxy sidecar and a
+path. `brunostctl init` writes the reviewed versioned profile to
+`security/brunost-seccomp-v1.json` and makes the generated `.env.example`
+reference that exact file. Each worker pod uses a restricted Docker socket-proxy sidecar and a
 shared host workspace so evaluator containers can safely access the paths that
 the worker creates.
 
@@ -141,7 +156,7 @@ communicate only through the versioned HTTP/API and signed callback contracts.
 ## Safety notes
 
 - Never commit `.env`, worker JSON credentials, or private task bundles.
-- Pin Judge, worker, database, and storage images by digest.
+- Pin Judge, worker, database, storage, sandbox, and socket-proxy images by digest.
 - Use HTTPS and an explicit callback host allowlist.
 - Do not use bundled PostgreSQL or single-node local artifact storage for an HA
   contest. The Helm chart intentionally requires external storage values for

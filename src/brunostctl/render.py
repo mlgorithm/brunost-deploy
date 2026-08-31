@@ -276,7 +276,11 @@ def render_compose(config: CountryConfig) -> str:
     return yaml.safe_dump(compose_mapping(config), sort_keys=False, default_flow_style=False)
 
 
-def render_env(config: CountryConfig) -> str:
+def render_env(
+    config: CountryConfig,
+    *,
+    seccomp_path: str = "/srv/brunost-judge/security/brunost-seccomp-v1.json",
+) -> str:
     return "\n".join(
         [
             f"BRUNOST_CLUSTER_NAME={config.name}",
@@ -296,7 +300,7 @@ def render_env(config: CountryConfig) -> str:
             "BRUNOST_JUDGE_SANDBOX_IMAGE=ghcr.io/mlgorithm/brunost-sandbox@sha256:<64-hex-digest>",
             "BRUNOST_JUDGE_SANDBOX_IMAGES={\"python-3.13\":\"ghcr.io/mlgorithm/brunost-sandbox@sha256:<64-hex-digest>\"}",
             "BRUNOST_JUDGE_SANDBOX_RUNTIME=runsc",
-            "BRUNOST_JUDGE_SANDBOX_SECCOMP=/srv/brunost-judge/security/brunost-seccomp.json",
+            f"BRUNOST_JUDGE_SANDBOX_SECCOMP={seccomp_path}",
             "",
         ]
     )
@@ -334,6 +338,7 @@ def helm_values_mapping(config: CountryConfig) -> dict[str, Any]:
                 "queues": list(worker.queues),
                 "resourceClasses": list(worker.resource_classes),
                 "region": worker.region or "",
+                "nodeSelector": dict(worker.node_selector),
                 "autoscaling": {
                     "enabled": worker.autoscaling,
                     "minReplicas": worker.min_replicas,

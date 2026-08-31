@@ -49,6 +49,7 @@ class WorkerConfig:
     queues: tuple[str, ...] = ("default",)
     region: str | None = None
     capabilities: tuple[str, ...] = ()
+    node_selector: dict[str, str] = field(default_factory=dict)
     replicas: int = 1
     autoscaling: bool = False
     min_replicas: int = 1
@@ -128,6 +129,11 @@ class CountryConfig:
             autoscaling = item.get("autoscaling") or {}
             if not isinstance(autoscaling, dict):
                 raise ConfigError(f"worker {item['name']} autoscaling must be a mapping")
+            node_selector = item.get("node_selector") or {}
+            if not isinstance(node_selector, dict) or any(
+                not str(key).strip() or not str(value).strip() for key, value in node_selector.items()
+            ):
+                raise ConfigError(f"worker {item['name']} node_selector must be a non-empty string mapping")
             workers.append(
                 WorkerConfig(
                     name=str(item["name"]),
@@ -135,6 +141,7 @@ class CountryConfig:
                     queues=tuple(str(value) for value in item.get("queues", ["default"])),
                     region=str(item["region"]) if item.get("region") else None,
                     capabilities=tuple(str(value) for value in item.get("capabilities", [])),
+                    node_selector={str(key): str(value) for key, value in node_selector.items()},
                     replicas=_as_int(item.get("replicas", 1), f"worker {item['name']} replicas"),
                     autoscaling=_as_bool(autoscaling.get("enabled"), f"worker {item['name']} autoscaling.enabled", default=False),
                     min_replicas=_as_int(autoscaling.get("min_replicas", item.get("replicas", 1)), f"worker {item['name']} autoscaling.min_replicas"),
@@ -212,6 +219,8 @@ class CountryConfig:
                 errors.append(f"worker {worker.name} replicas must be within autoscaling bounds")
             if not 1 <= worker.target_cpu_utilization <= 100:
                 errors.append(f"worker {worker.name} target_cpu_utilization must be between 1 and 100")
+            if strict and self.backend == "k3s" and not worker.node_selector:
+                errors.append(f"worker {worker.name} needs node_selector for K3s capability placement")
         if self.storage.postgres not in {"bundled", "external"}:
             errors.append("storage.postgres must be bundled or external")
         if self.storage.postgres == "external" and not self.storage.postgres_url:
@@ -268,6 +277,7 @@ class CountryConfig:
                     "queues": list(worker.queues),
                     **({"region": worker.region} if worker.region else {}),
                     **({"capabilities": list(worker.capabilities)} if worker.capabilities else {}),
+                    **({"node_selector": worker.node_selector} if worker.node_selector else {}),
                     **({"replicas": worker.replicas} if worker.replicas != 1 else {}),
                     **(
                         {

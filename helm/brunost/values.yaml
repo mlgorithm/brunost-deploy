@@ -18,6 +18,7 @@ workers:
     replicas: 1
     queues: [default]
     resourceClasses: [cpu]
+    nodeSelector: {}
     autoscaling:
       enabled: false
       minReplicas: 1
@@ -31,6 +32,7 @@ workers:
     replicas: 1
     queues: [gpu, default]
     resourceClasses: [gpu, cpu]
+    nodeSelector: {}
     autoscaling:
       enabled: false
       minReplicas: 1
@@ -78,7 +80,7 @@ workerDefaults:
     images: '{"python-3.13":"ghcr.io/mlgorithm/brunost-sandbox@sha256:<64-hex-digest>"}'
     runtime: runsc
     requireSeccomp: "true"
-    seccompProfilePath: /srv/brunost-judge/security/brunost-seccomp.json
+    seccompProfilePath: /srv/brunost-judge/security/brunost-seccomp-v1.json
   podDisruptionBudget:
     enabled: true
     maxUnavailable: 0

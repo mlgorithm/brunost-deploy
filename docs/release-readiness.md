@@ -13,7 +13,8 @@ application and must be verified through the signed callback contract.
 - `brunostctl preflight --strict` passes with `.env` and every worker credential
   file mode `0600`.
 - Workers have a Docker-compatible runtime, the restricted socket proxy, the
-  required seccomp profile, and a shared workspace path.
+  required versioned seccomp profile, a shared workspace path, and an explicit
+  K3s `node_selector` when running on Kubernetes.
 - PostgreSQL and object storage are shared and durable for every control-plane
   replica and worker.
 - `brunostctl install --dry-run` validates the generated deployment, followed
@@ -25,9 +26,14 @@ application and must be verified through the signed callback contract.
 
 ## Rollout order
 
-1. Render and snapshot the release manifest.
+1. Update the topology with digest-pinned images, render it, and snapshot the
+   release manifest. `--release` records the immutable topology release; it
+   does not select an image tag itself.
 2. Deploy or upgrade Judge and workers.
 3. Verify Judge `/readyz`, callback dispatcher health, and worker registration.
 4. Deploy Premium and verify Premium `/readyz` plus a signed callback smoke.
 5. Keep the previous release snapshot until the contest has passed its first
-   operational checkpoint.
+   operational checkpoint. For Compose, confirm the snapshot contains
+   `runtime.env`; it is copied from the previous successful deployment and
+   keeps the prior sandbox/proxy runtime pins while secrets continue to come
+   from the operator's protected `.env`.

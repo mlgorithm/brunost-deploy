@@ -38,8 +38,19 @@ def preset_mapping(name: str, *, cluster_name: str, public_url: str) -> dict[str
             "backend": "k3s",
             "judge": {"replicas": 2, "callback_hosts": ["premium"]},
             "workers": [
-                {"name": "cpu-1", "resource_classes": ["cpu"], "queues": ["default"]},
-                {"name": "gpu-1", "resource_classes": ["gpu", "cpu"], "queues": ["gpu", "default"]},
+                {
+                    "name": "cpu-1",
+                    "resource_classes": ["cpu"],
+                    "queues": ["default"],
+                    "node_selector": {"brunost.io/worker": "cpu-1"},
+                },
+                {
+                    "name": "gpu-1",
+                    "resource_classes": ["gpu", "cpu"],
+                    "queues": ["gpu", "default"],
+                    "capabilities": ["gpu:true"],
+                    "node_selector": {"brunost.io/worker": "gpu-1"},
+                },
             ],
             "storage": {
                 "postgres": "external",

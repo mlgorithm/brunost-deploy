@@ -1,6 +1,6 @@
 [project]
 name = "brunost-deploy"
-version = "0.2.0"
+version = "0.3.0"
 description = "No-code deployment and lifecycle tooling for Brunost Judge"
 requires-python = ">=3.11"
 dependencies = ["PyYAML>=6.0,<7"]
@@ -11,6 +11,7 @@ authors = [{name = "Mlgorithm contributors"}]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
+  "Development Status :: 4 - Beta",
 ]
 
 [project.scripts]
@@ -27,7 +28,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-brunostctl = ["chart/brunost/*", "chart/brunost/templates/*"]
+brunostctl = ["chart/brunost/*", "chart/brunost/templates/*", "security/*.json"]
 
 [tool.ruff]
 target-version = "py311"
