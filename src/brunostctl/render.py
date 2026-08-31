@@ -171,7 +171,7 @@ def compose_mapping(config: CountryConfig) -> dict[str, Any]:
                 **_environment(config, control_plane=False),
                 "BRUNOST_JUDGE_URL": "http://judge:8787",
                 # This is an explicit, allowlisted Docker-network exception;
-                # all external Premium/control-plane traffic remains HTTPS.
+                # all external Platform/control-plane traffic remains HTTPS.
                 "BRUNOST_JUDGE_ALLOW_INSECURE_HTTP": "true",
                 "BRUNOST_JUDGE_INTERNAL_HTTP_HOSTS": "judge",
                 "BRUNOST_WORKER_QUEUES": ",".join(worker.queues),
@@ -231,7 +231,7 @@ def compose_mapping(config: CountryConfig) -> dict[str, Any]:
 
 
 def synchronization_checks(config: CountryConfig) -> dict[str, Any]:
-    """Return non-secret checks for the Premium callback delivery path.
+    """Return non-secret checks for the Platform callback delivery path.
 
     This inspects the rendered Compose model in memory. It deliberately does
     not contact either application or mutate the deployment, which makes it

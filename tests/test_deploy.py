@@ -45,7 +45,7 @@ def test_compose_contains_control_plane_workers_and_shared_postgres():
     assert rendered["services"]["worker-gpu-1"]["environment"]["BRUNOST_WORKER_RESOURCE_CLASSES"] == "gpu,cpu"
     assert rendered["services"]["worker-gpu-1"]["environment"]["BRUNOST_JUDGE_REQUIRE_SIGNED_CALLBACKS"] == "true"
     assert "BRUNOST_JUDGE_CALLBACK_SIGNING_SECRET" in rendered["services"]["worker-gpu-1"]["environment"]
-    assert rendered["services"]["judge"]["environment"]["BRUNOST_JUDGE_CALLBACK_HOSTS"] == "premium"
+    assert rendered["services"]["judge"]["environment"]["BRUNOST_JUDGE_CALLBACK_HOSTS"] == "platform"
     assert "BRUNOST_JUDGE_API_TOKEN" not in rendered["services"]["worker-gpu-1"]["environment"]
     assert "BRUNOST_JUDGE_DATABASE_URL" not in rendered["services"]["worker-gpu-1"]["environment"]
     assert "docker-socket-proxy" in rendered["services"]
@@ -56,7 +56,7 @@ def test_compose_contains_control_plane_workers_and_shared_postgres():
 def test_synchronization_checks_cover_durable_signed_callback_delivery():
     config = CountryConfig.from_mapping(preset_mapping("small", cluster_name="test", public_url="https://test.example"))
     checks = synchronization_checks(config)
-    assert checks["callback_hosts"] == ["premium"]
+    assert checks["callback_hosts"] == ["platform"]
     assert checks["idempotency_header_required"] is True
     assert all(checks["callback_dispatcher"].values())
     assert checks["workers"]["socket_proxy_present"] is True
@@ -258,13 +258,14 @@ def test_verify_is_read_only_and_checks_both_readiness_endpoints(tmp_path: Path,
             "https://judge.test",
             "--token",
             "judge-token",
-            "--premium-url",
-            "https://premium.test",
+            "--platform-url",
+            "https://platform.test",
         ]
     ) == 0
-    assert requests == [("https://judge.test/readyz", "judge-token"), ("https://premium.test/readyz", None)]
+    assert requests == [("https://judge.test/readyz", "judge-token"), ("https://platform.test/readyz", None)]
     result = yaml.safe_load(capsys.readouterr().out)
     assert result["status"] == "ok"
+    assert result["platform"]["url"] == "https://platform.test"
     assert result["synchronization"]["callback_dispatcher"]["signed_callbacks_required"] is True
     assert not (tmp_path / ".brunost").exists()
 
@@ -284,6 +285,49 @@ def test_verify_loads_judge_token_from_operator_env_file(tmp_path: Path, monkeyp
     monkeypatch.setattr("brunostctl.cli._json_request", fake_request)
     assert main(["verify", "--config", str(config_path), "--url", "https://judge.test"]) == 0
     assert observed == ["from-env-file"]
+
+
+def test_platform_env_generates_a_non_secret_connection_template(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    assert (
+        main(
+            [
+                "init",
+                str(tmp_path),
+                "--name",
+                "demo",
+                "--public-url",
+                "https://judge.example.test",
+                "--platform-url",
+                "https://platform.example.test",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    assert (
+        main(
+            [
+                "platform-env",
+                "--config",
+                str(tmp_path / "brunost.yaml"),
+                "--platform-url",
+                "https://platform.example.test",
+            ]
+        )
+        == 0
+    )
+    rendered = capsys.readouterr().out
+    assert "BRUNOST_JUDGE_URL=https://judge.example.test" in rendered
+    assert "BRUNOST_PLATFORM_CALLBACK_URL=https://platform.example.test/api/judge/callback" in rendered
+    assert "BRUNOST_JUDGE_API_TOKEN=<platform-service-token>" in rendered
+    assert "BRUNOST_JUDGE_API_TOKEN=local" not in rendered
+
+
+def test_platform_env_requires_a_declared_callback_host(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    topology = tmp_path / "brunost.yaml"
+    topology.write_text(yaml.safe_dump(preset_mapping("single", cluster_name="demo", public_url="https://judge.example.test"), sort_keys=False), encoding="utf-8")
+    assert main(["platform-env", "--config", str(topology), "--platform-url", "https://other.example.test"]) == 2
+    assert "not in judge.callback_hosts" in capsys.readouterr().err
 
 
 def test_topology_worker_enrollment_grants_runtime_and_declared_capabilities(

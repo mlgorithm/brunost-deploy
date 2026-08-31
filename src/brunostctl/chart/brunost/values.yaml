@@ -7,7 +7,7 @@ judge:
   port: 8787
   apiToken: replace-me
   callbackSigningSecret: replace-me
-  callbackHosts: [premium.example.org]
+  callbackHosts: [platform.example.org]
   podDisruptionBudget:
     enabled: true
     minAvailable: 1

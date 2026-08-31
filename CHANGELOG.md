@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.1
+
+- Make the operator layer platform-neutral: Platform Kit, Premium, and other
+  compatible control planes connect through the same Judge HTTP and signed
+  callback boundary.
+- Add `brunostctl platform-env`, which validates the callback allowlist and
+  generates a non-secret Platform Kit connection template.
+- Let `brunostctl init --platform-url` set the initial callback allowlist, and
+  rename pre-cutover verification around the generic Platform endpoint while
+  retaining hidden Premium CLI aliases for existing runbooks.
+
 ## 0.3.0
 
 - Bundle and materialize the reviewed versioned Docker seccomp profile with

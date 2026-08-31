@@ -3,9 +3,9 @@
 `brunost-deploy` is the open-source operator layer for installing Brunost Judge
 in a country. It turns a topology file into a Compose or K3s deployment and
 provides safe worker enrollment, preflight checks, upgrades, backups, and
-rollback commands. Premium remains a separate private application that points
-at the deployed Judge API and callback endpoint; this repository never deploys
-Premium or owns Premium data.
+rollback commands. A Platform Kit application, Premium, or another compatible
+control plane points at the deployed Judge API and callback endpoint; this
+repository never deploys that application or owns its user data.
 
 ## Install
 
@@ -15,11 +15,17 @@ python -m pip install 'brunost-deploy>=0.3,<0.4'
 # Repository development:
 # python -m pip install -e '.[dev]'
 brunostctl init country-2026 --preset small --name country-2026 \
-  --public-url https://contest.example.org
+  --public-url https://judge.example.org \
+  --platform-url https://contest.example.org
 cd country-2026
 cp .env.example .env
 # Replace every secret and every <64-hex-digest> before production.
 brunostctl preflight --strict
+
+# Generate a safe, non-secret connection template for a separately deployed
+# Platform Kit application. Inject the shared credentials through a secret manager.
+brunostctl platform-env --config brunost.yaml \
+  --platform-url https://contest.example.org
 ```
 
 Presets:
@@ -61,7 +67,7 @@ brunostctl install
 brunostctl status --url https://judge.example.org --token "$BRUNOST_JUDGE_API_TOKEN"
 brunostctl verify --config brunost.yaml \
   --url https://judge.example.org --token "$BRUNOST_JUDGE_API_TOKEN" \
-  --premium-url https://premium.example.org
+  --platform-url https://contest.example.org
 brunostctl backup --config brunost.yaml --output backups/judge.dump --dry-run
 brunostctl upgrade --config brunost.yaml --release 2026.08.1 --dry-run
 brunostctl rollback --config brunost.yaml --release pre-2026.08.1 --dry-run
@@ -115,43 +121,49 @@ flowchart TB
   W --> A
 ```
 
-Premium owns users, contests, permissions, UI, submissions, and leaderboard
-policy. The Judge control plane owns evaluations, worker registry, scheduling,
-and execution state. Workers only execute sandboxed tasks. This repository
-owns deployment lifecycle; it does not duplicate either domain.
+The connected Platform owns users, contests, permissions, UI, submissions, and
+leaderboard policy. The Judge control plane owns evaluations, worker registry,
+scheduling, and execution state. Workers only execute sandboxed tasks. This
+repository owns deployment lifecycle; it does not duplicate either domain.
 
 `brunostctl verify` is a read-only pre-cutover check. It validates that the
 rendered deployment has a durable callback dispatcher using the same Judge
-image and database, requires signed callbacks, and has an explicit Premium
-callback allowlist. It then checks Judge `/readyz` and, when `--premium-url` is
-provided, Premium `/readyz`. It does not create submissions, replay callbacks,
-or change either service.
+image and database, requires signed callbacks, and has an explicit Platform
+callback allowlist. It then checks Judge `/readyz` and, when `--platform-url`
+is provided, Platform `/readyz`. It does not create submissions, replay
+callbacks, or change either service.
 
 ## Task packages
 
 Task authors publish immutable task bundles. Deterministic code, ML
 train/predict, quiz, and optimization workflows are evaluated by the Judge
 contract; deployment does not assume a task implementation language. Register
-a task with the Judge SDK or CLI, then add its stable `task_ref` to a Premium
-task. Premium sends immutable artifacts to Judge and receives signed,
+a task with the Judge SDK or CLI, then add its stable `task_ref` to a Platform
+contest. The Platform sends immutable artifacts to Judge and receives signed,
 idempotent callbacks.
 
-## Premium integration
+## Platform Kit integration
 
-After installing Judge, configure Premium with:
+After installing Judge, generate the non-secret connection template with
+`brunostctl platform-env`. It writes the exact Judge URL, approved callback URL,
+and secure standalone defaults without copying any Judge secret. The generated
+Platform Kit application receives the shared service token and callback secret
+from your secret manager:
 
 ```bash
 BRUNOST_JUDGE_URL=https://judge.example.org
-BRUNOST_JUDGE_API_TOKEN=<scoped-judge-service-token>
-BRUNOST_JUDGE_CALLBACK_URL=https://premium.example.org/api/judge/callback
-BRUNOST_JUDGE_CALLBACK_TOKEN=<premium-callback-bearer-token>
+BRUNOST_JUDGE_API_TOKEN=<platform-service-token>
+BRUNOST_PLATFORM_CALLBACK_URL=https://contest.example.org/api/judge/callback
+BRUNOST_PLATFORM_CALLBACK_TOKEN=<platform-callback-bearer-token>
 BRUNOST_JUDGE_CALLBACK_SECRET=<shared-callback-signing-secret>
 ```
 
 Set `judge.callback_hosts` in the topology to the hostname used by
-`BRUNOST_JUDGE_CALLBACK_URL`. The deployment tool configures Judge's callback
-allowlist from that value. Premium and Judge use separate databases; they
-communicate only through the versioned HTTP/API and signed callback contracts.
+`BRUNOST_PLATFORM_CALLBACK_URL`. `brunostctl init --platform-url` does this
+for a new topology, and `platform-env` refuses an unallowlisted hostname. The
+deployment tool configures Judge's callback allowlist from that value. Platform
+and Judge use separate databases; they communicate only through the versioned
+HTTP/API and signed callback contracts.
 
 ## Safety notes
 

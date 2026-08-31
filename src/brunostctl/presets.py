@@ -11,7 +11,7 @@ def preset_mapping(name: str, *, cluster_name: str, public_url: str) -> dict[str
             "version": 1,
             "cluster": {"name": cluster_name, "public_url": public_url},
             "backend": "compose",
-            "judge": {"replicas": 1, "callback_hosts": ["premium"]},
+            "judge": {"replicas": 1, "callback_hosts": ["platform"]},
             "workers": [{"name": "cpu-1", "resource_classes": ["cpu"], "queues": ["default"]}],
             "storage": {"postgres": "bundled", "artifacts": "minio"},
             "security": {"tls": public_url.startswith("https://")},
@@ -21,7 +21,7 @@ def preset_mapping(name: str, *, cluster_name: str, public_url: str) -> dict[str
             "version": 1,
             "cluster": {"name": cluster_name, "public_url": public_url},
             "backend": "compose",
-            "judge": {"replicas": 1, "callback_hosts": ["premium"]},
+            "judge": {"replicas": 1, "callback_hosts": ["platform"]},
             "workers": [
                 {"name": "cpu-1", "resource_classes": ["cpu"], "queues": ["default"]},
                 {"name": "cpu-2", "resource_classes": ["cpu"], "queues": ["default"]},
@@ -36,7 +36,7 @@ def preset_mapping(name: str, *, cluster_name: str, public_url: str) -> dict[str
             "version": 1,
             "cluster": {"name": cluster_name, "public_url": public_url},
             "backend": "k3s",
-            "judge": {"replicas": 2, "callback_hosts": ["premium"]},
+            "judge": {"replicas": 2, "callback_hosts": ["platform"]},
             "workers": [
                 {
                     "name": "cpu-1",

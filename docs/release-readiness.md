@@ -1,13 +1,15 @@
 # Release readiness
 
 Use this checklist for every Judge deployment. The deployment tool is the
-source of truth for rendered Compose/Helm output; Premium remains a separate
-application and must be verified through the signed callback contract.
+source of truth for rendered Compose/Helm output; the connected Platform
+remains a separate application and must be verified through the signed callback
+contract.
 
 ## Required gates
 
 - `ruff check src tests`, `compileall`, and the complete test suite pass in all
-  four repositories: Judge, Deploy, Platform Kit, and Premium.
+  Judge, Deploy, and Platform Kit repositories (plus any optional Premium
+  deployment).
 - Judge and worker images, sandbox images, proxy images, PostgreSQL, and object
   storage images are pinned by immutable digest.
 - `brunostctl preflight --strict` passes with `.env` and every worker credential
@@ -19,7 +21,7 @@ application and must be verified through the signed callback contract.
   replica and worker.
 - `brunostctl install --dry-run` validates the generated deployment, followed
   by `brunostctl install` with `--atomic`/rollback support.
-- `brunostctl verify` reports Judge and Premium ready, signed callbacks, and a
+- `brunostctl verify` reports Judge and Platform ready, signed callbacks, and a
   durable callback dispatcher.
 - Exercise worker drain, worker loss, callback retry/replay, backup/restore,
   and rollback before an official round.
@@ -31,7 +33,7 @@ application and must be verified through the signed callback contract.
    does not select an image tag itself.
 2. Deploy or upgrade Judge and workers.
 3. Verify Judge `/readyz`, callback dispatcher health, and worker registration.
-4. Deploy Premium and verify Premium `/readyz` plus a signed callback smoke.
+4. Deploy the Platform and verify Platform `/readyz` plus a signed callback smoke.
 5. Keep the previous release snapshot until the contest has passed its first
    operational checkpoint. For Compose, confirm the snapshot contains
    `runtime.env`; it is copied from the previous successful deployment and

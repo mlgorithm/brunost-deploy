@@ -78,7 +78,11 @@ class CountryConfig:
     judge_replicas: int = 1
     judge_image: str = "ghcr.io/mlgorithm/brunost-judge:0.8.0"
     worker_image: str = "ghcr.io/mlgorithm/brunost-judge:0.8.0"
-    callback_hosts: tuple[str, ...] = ("premium",)
+    # This is deliberately a generic application placeholder.  A Judge
+    # deployment may serve Platform Kit, Premium, or another HTTP client;
+    # strict preflight requires the operator to replace it with that
+    # application's real callback hostname.
+    callback_hosts: tuple[str, ...] = ("platform",)
     workers: tuple[WorkerConfig, ...] = field(default_factory=tuple)
     storage: StorageConfig = field(default_factory=StorageConfig)
     tls: bool = True
@@ -149,7 +153,7 @@ class CountryConfig:
                     target_cpu_utilization=_as_int(autoscaling.get("target_cpu_utilization", 70), f"worker {item['name']} autoscaling.target_cpu_utilization"),
                 )
             )
-        callback_hosts = judge.get("callback_hosts", (raw.get("integrations") or {}).get("judge_callback_hosts", ["premium"]))
+        callback_hosts = judge.get("callback_hosts", (raw.get("integrations") or {}).get("judge_callback_hosts", ["platform"]))
         if not isinstance(callback_hosts, (list, tuple)):
             raise ConfigError("judge.callback_hosts must be a list")
         config = cls(
@@ -241,8 +245,8 @@ class CountryConfig:
             errors.append("K3s production requires external or replicated PostgreSQL")
         if strict and self.backend == "k3s" and self.storage.artifacts not in {"s3", "external"}:
             errors.append("K3s production requires S3-compatible shared artifact storage")
-        if strict and self.callback_hosts == ("premium",):
-            errors.append("judge.callback_hosts must be replaced with the real Premium callback hostname")
+        if strict and self.callback_hosts in {("platform",), ("premium",)}:
+            errors.append("judge.callback_hosts must be replaced with the real Platform callback hostname")
         if strict:
             for label, image in (("judge", self.judge_image), ("worker", self.worker_image)):
                 if not _DIGEST_IMAGE_RE.fullmatch(image):
