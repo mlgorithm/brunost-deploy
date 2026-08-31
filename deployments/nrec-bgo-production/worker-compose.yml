@@ -33,7 +33,7 @@ services:
       BRUNOST_JUDGE_SANDBOX_IMAGES: ${BRUNOST_JUDGE_SANDBOX_IMAGES:?set BRUNOST_JUDGE_SANDBOX_IMAGES}
       BRUNOST_JUDGE_SANDBOX_RUNTIME: runsc
       BRUNOST_JUDGE_REQUIRE_SECCOMP: "true"
-      BRUNOST_JUDGE_SANDBOX_SECCOMP: /srv/brunost-judge/security/brunost-seccomp.json
+      BRUNOST_JUDGE_SANDBOX_SECCOMP: /srv/brunost-judge/security/brunost-seccomp-v1.json
       BRUNOST_JUDGE_SANDBOX_TIMEOUT_SECONDS: "900"
       BRUNOST_JUDGE_SANDBOX_MEMORY: 4g
       BRUNOST_JUDGE_SANDBOX_CPUS: "2"
@@ -51,7 +51,7 @@ services:
     volumes:
       - /srv/brunost-judge/node.json:/etc/brunost/node.json:ro
       - /srv/brunost-judge/workspaces:/srv/brunost-judge/workspaces:rw
-      - /srv/brunost-judge/security/brunost-seccomp.json:/srv/brunost-judge/security/brunost-seccomp.json:ro
+      - /srv/brunost-judge/security/brunost-seccomp-v1.json:/srv/brunost-judge/security/brunost-seccomp-v1.json:ro
     healthcheck:
       test: ["CMD-SHELL", "test -s /etc/brunost/node.json && kill -0 1"]
       interval: 15s
